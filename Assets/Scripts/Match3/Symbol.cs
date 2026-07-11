@@ -1,4 +1,4 @@
-using System.Collections;
+using DG.Tweening;
 using UnityEngine;
 
 /// <summary>
@@ -16,6 +16,8 @@ public class Symbol : MonoBehaviour
 
     [SerializeField] private SpriteRenderer spriteRenderer;
     [SerializeField] private SymbolVisualConfig visualConfig;
+
+    private Tween activeTween;
 
     public void Initialize(SymbolType type, SpecialType special, Vector2Int gridPosition)
     {
@@ -38,28 +40,22 @@ public class Symbol : MonoBehaviour
         if (sprite != null) spriteRenderer.sprite = sprite;
     }
 
-    public void MoveTo(Vector3 worldPosition, float duration, System.Action onComplete = null)
+    /// <summary>
+    /// Tweens to the given world position and returns the Tween so callers can Join it into
+    /// a Sequence (Board does this to wait for every symbol in a swap/fall to finish together).
+    /// </summary>
+    public Tween MoveTo(Vector3 worldPosition, float duration, Ease ease = Ease.OutQuad)
     {
-        StopAllCoroutines();
-        StartCoroutine(MoveRoutine(worldPosition, duration, onComplete));
+        activeTween?.Kill();
+        activeTween = transform.DOMove(worldPosition, duration).SetEase(ease);
+        return activeTween;
     }
 
-    private IEnumerator MoveRoutine(Vector3 target, float duration, System.Action onComplete)
-    {
-        Vector3 start = transform.position;
-        float t = 0f;
-        while (t < duration)
-        {
-            t += Time.deltaTime;
-            transform.position = Vector3.Lerp(start, target, duration <= 0f ? 1f : t / duration);
-            yield return null;
-        }
-        transform.position = target;
-        onComplete?.Invoke();
-    }
+    private void OnDestroy() => activeTween?.Kill();
 
     private void OnMouseDown()
     {
         Board.Instance?.SelectSymbol(this);
     }
 }
+

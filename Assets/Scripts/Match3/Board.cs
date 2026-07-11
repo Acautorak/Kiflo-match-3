@@ -1,6 +1,7 @@
 using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
+using DG.Tweening;
 using UnityEngine;
 
 /// <summary>
@@ -49,6 +50,11 @@ public class Board : MonoBehaviour
     [Header("Timing")]
     [SerializeField] private float swapDuration = 0.2f;
     [SerializeField] private float fallDuration = 0.25f;
+
+    [Header("Rules")]
+    [Tooltip("If true, any adjacent swap completes and stays, even if it doesn't create a match. " +
+             "If false, swaps that don't create a match are reverted (classic match-3 behavior).")]
+    [SerializeField] private bool allowNonMatchingSwaps = true;
 
     private Cell[,] grid;
     private Symbol selected;
@@ -161,15 +167,18 @@ public class Board : MonoBehaviour
         isBusy = true;
         yield return SwapRoutine(a, b);
 
-        var matches = MatchFinder.FindAllMatches(grid, width, height);
-        if (matches.Count == 0)
+        var matchGroups = MatchFinder.FindMatchGroups(grid, width, height);
+        if (matchGroups.Count == 0)
         {
-            yield return SwapRoutine(a, b); // revert - no match, invalid move
+            if (!allowNonMatchingSwaps)
+            {
+                yield return SwapRoutine(a, b); // revert - no match, invalid move
+            }
             isBusy = false;
             yield break;
         }
 
-        yield return ResolveMatches(matches);
+        yield return ResolveMatches(matchGroups);
         isBusy = false;
     }
 
@@ -183,44 +192,50 @@ public class Board : MonoBehaviour
         a.GridPosition = posB;
         b.GridPosition = posA;
 
-        a.MoveTo(GridToWorld(posB.x, posB.y), swapDuration);
-        b.MoveTo(GridToWorld(posA.x, posA.y), swapDuration);
+        var sequence = DOTween.Sequence();
+        sequence.Join(a.MoveTo(GridToWorld(posB.x, posB.y), swapDuration));
+        sequence.Join(b.MoveTo(GridToWorld(posA.x, posA.y), swapDuration));
 
-        yield return new WaitForSeconds(swapDuration);
+        yield return sequence.WaitForCompletion();
     }
 
     #endregion
 
     #region Matching / Cascades
 
-    private IEnumerator ResolveMatches(List<List<Vector2Int>> initialMatches)
+    private IEnumerator ResolveMatches(List<MatchGroup> initialGroups)
     {
-        var currentMatches = initialMatches;
+        var currentGroups = initialGroups;
         int chainCount = 0;
 
-        while (currentMatches.Count > 0)
+        while (currentGroups.Count > 0)
         {
             chainCount++;
 
             var allPositions = new HashSet<Vector2Int>();
             var specialsToCreate = new List<(Vector2Int pos, SpecialType special, SymbolType type)>();
 
-            foreach (var line in currentMatches)
+            foreach (var group in currentGroups)
             {
-                foreach (var p in line) allPositions.Add(p);
+                foreach (var p in group.Cells) allPositions.Add(p);
 
-                // Longer runs upgrade the "seed" cell (middle of the run) into a special symbol.
-                if (line.Count >= 5)
+                var seed = group.GetSeedCell();
+                var seedType = grid[seed.x, seed.y].Occupant.Type;
+
+                if (group.IsIntersection)
                 {
-                    var center = line[line.Count / 2];
-                    specialsToCreate.Add((center, SpecialType.ColorClear, grid[center.x, center.y].Occupant.Type));
+                    // Two runs crossing (L/T/plus shape) -> Bomb at the intersection cell.
+                    specialsToCreate.Add((seed, SpecialType.Bomb, seedType));
                 }
-                else if (line.Count == 4)
+                else if (group.LongestRun >= 5)
                 {
-                    var center = line[line.Count / 2];
+                    specialsToCreate.Add((seed, SpecialType.ColorClear, seedType));
+                }
+                else if (group.LongestRun == 4)
+                {
+                    var line = group.Lines[0];
                     bool horizontal = line[0].y == line[1].y;
-                    var special = horizontal ? SpecialType.RowClear : SpecialType.ColumnClear;
-                    specialsToCreate.Add((center, special, grid[center.x, center.y].Occupant.Type));
+                    specialsToCreate.Add((seed, horizontal ? SpecialType.RowClear : SpecialType.ColumnClear, seedType));
                 }
             }
 
@@ -240,7 +255,7 @@ public class Board : MonoBehaviour
                 var occ = grid[pos.x, pos.y]?.Occupant;
                 if (occ != null) EventBus.Publish(new SymbolMatchedEvent(occ.Type, pos));
             }
-            EventBus.Publish(new ChainMatchedEvent(currentMatches.Sum(l => l.Count), chainCount, allPositions.ToArray()));
+            EventBus.Publish(new ChainMatchedEvent(currentGroups.Sum(g => g.Cells.Count), chainCount, allPositions.ToArray()));
 
             int scoreDelta = allPositions.Count * 10 * chainCount;
             currentScore += scoreDelta;
@@ -266,7 +281,7 @@ public class Board : MonoBehaviour
             }
 
             yield return CollapseAndRefill();
-            currentMatches = MatchFinder.FindAllMatches(grid, width, height);
+            currentGroups = MatchFinder.FindMatchGroups(grid, width, height);
         }
 
         SaveSystem.Save(BuildSaveData());
@@ -315,6 +330,9 @@ public class Board : MonoBehaviour
 
     private IEnumerator CollapseAndRefill()
     {
+        var sequence = DOTween.Sequence();
+        bool anyMovement = false;
+
         for (int x = 0; x < width; x++)
         {
             int writeY = 0;
@@ -328,7 +346,8 @@ public class Board : MonoBehaviour
                     grid[x, writeY].Occupant = occ;
                     grid[x, y].Occupant = null;
                     occ.GridPosition = new Vector2Int(x, writeY);
-                    occ.MoveTo(GridToWorld(x, writeY), fallDuration);
+                    sequence.Join(occ.MoveTo(GridToWorld(x, writeY), fallDuration));
+                    anyMovement = true;
                 }
                 writeY++;
             }
@@ -342,11 +361,12 @@ public class Board : MonoBehaviour
                 var instance = Instantiate(prefab, GridToWorld(x, spawnHeight), Quaternion.identity, symbolParent);
                 instance.Initialize(type, SpecialType.None, new Vector2Int(x, y));
                 grid[x, y].Occupant = instance;
-                instance.MoveTo(GridToWorld(x, y), fallDuration);
+                sequence.Join(instance.MoveTo(GridToWorld(x, y), fallDuration));
+                anyMovement = true;
             }
         }
 
-        yield return new WaitForSeconds(fallDuration);
+        if (anyMovement) yield return sequence.WaitForCompletion();
     }
 
     #endregion

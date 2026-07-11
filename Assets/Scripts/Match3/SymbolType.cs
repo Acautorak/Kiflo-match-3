@@ -5,7 +5,6 @@ public enum SymbolType
     Green,
     Yellow,
     Purple,
-    Orange
 }
 
 public enum SpecialType
