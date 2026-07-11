@@ -1,89 +1,74 @@
 using UnityEngine;
 
-namespace Match3.Events
+// All events are readonly structs: cheap, no GC allocation pressure, and immutable once published.
+
+public readonly struct SymbolMatchedEvent
 {
-    public readonly struct BoardInitializedEvent : IEvent
-    {
-        public readonly int Width;
-        public readonly int Height;
-        public BoardInitializedEvent(int width, int height) { Width = width; Height = height; }
-    }
+    public readonly SymbolType Type;
+    public readonly Vector2Int Position;
 
-    public readonly struct TileSwappedEvent : IEvent
+    public SymbolMatchedEvent(SymbolType type, Vector2Int position)
     {
-        public readonly Vector2Int From;
-        public readonly Vector2Int To;
-        public readonly bool WasValid;
-        public TileSwappedEvent(Vector2Int from, Vector2Int to, bool wasValid)
-        {
-            From = from; To = to; WasValid = wasValid;
-        }
+        Type = type;
+        Position = position;
     }
+}
 
-    public readonly struct MatchFoundEvent : IEvent
+public readonly struct ChainMatchedEvent
+{
+    public readonly int SymbolsCleared;
+    public readonly int ChainCount;      // 1 = initial match, 2 = first cascade, etc. Use for combo multipliers/UI.
+    public readonly Vector2Int[] Positions;
+
+    public ChainMatchedEvent(int symbolsCleared, int chainCount, Vector2Int[] positions)
     {
-        public readonly int ColorId;
-        public readonly int Count;
-        public readonly Vector2Int Origin;
-        public MatchFoundEvent(int colorId, int count, Vector2Int origin)
-        {
-            ColorId = colorId; Count = count; Origin = origin;
-        }
+        SymbolsCleared = symbolsCleared;
+        ChainCount = chainCount;
+        Positions = positions;
     }
+}
 
-    /// <summary>Fired once per wave of the resolve loop — useful for staggering VFX/SFX on big cascades.</summary>
-    public readonly struct CascadeStepEvent : IEvent
+public readonly struct SpecialSymbolCreatedEvent
+{
+    public readonly SpecialType Special;
+    public readonly Vector2Int Position;
+
+    public SpecialSymbolCreatedEvent(SpecialType special, Vector2Int position)
     {
-        public readonly int CascadeDepth;
-        public CascadeStepEvent(int depth) { CascadeDepth = depth; }
+        Special = special;
+        Position = position;
     }
+}
 
-    public readonly struct ScoreChangedEvent : IEvent
+/// <summary>Fired when a special symbol is triggered/consumed as part of a match.</summary>
+public readonly struct SpecialSymbolMatchedEvent
+{
+    public readonly SpecialType Special;
+    public readonly Vector2Int Position;
+    public readonly Vector2Int[] AffectedCells;
+
+    public SpecialSymbolMatchedEvent(SpecialType special, Vector2Int position, Vector2Int[] affectedCells)
     {
-        public readonly int NewScore;
-        public readonly int Delta;
-        public ScoreChangedEvent(int newScore, int delta) { NewScore = newScore; Delta = delta; }
+        Special = special;
+        Position = position;
+        AffectedCells = affectedCells;
     }
+}
 
-    public readonly struct MovesChangedEvent : IEvent
+public readonly struct ScoreChangedEvent
+{
+    public readonly int NewScore;
+    public readonly int Delta;
+
+    public ScoreChangedEvent(int newScore, int delta)
     {
-        public readonly int RemainingMoves;
-        public MovesChangedEvent(int remaining) { RemainingMoves = remaining; }
+        NewScore = newScore;
+        Delta = delta;
     }
+}
 
-    public readonly struct GoalProgressEvent : IEvent
-    {
-        public readonly int GoalIndex;
-        public readonly int Current;
-        public readonly int Target;
-        public GoalProgressEvent(int goalIndex, int current, int target)
-        {
-            GoalIndex = goalIndex; Current = current; Target = target;
-        }
-    }
-
-    public readonly struct LevelCompletedEvent : IEvent
-    {
-        public readonly int LevelId;
-        public readonly int Stars;
-        public readonly int FinalScore;
-        public LevelCompletedEvent(int levelId, int stars, int finalScore)
-        {
-            LevelId = levelId; Stars = stars; FinalScore = finalScore;
-        }
-    }
-
-    public readonly struct LevelFailedEvent : IEvent
-    {
-        public readonly int LevelId;
-        public LevelFailedEvent(int levelId) { LevelId = levelId; }
-    }
-
-    public readonly struct SaveRequestedEvent : IEvent { }
-
-    public readonly struct SaveCompletedEvent : IEvent
-    {
-        public readonly bool Success;
-        public SaveCompletedEvent(bool success) { Success = success; }
-    }
+public readonly struct GameOverEvent
+{
+    public readonly int FinalScore;
+    public GameOverEvent(int finalScore) => FinalScore = finalScore;
 }

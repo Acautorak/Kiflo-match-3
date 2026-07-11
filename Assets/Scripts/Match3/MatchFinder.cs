@@ -1,70 +1,67 @@
 using System.Collections.Generic;
+using UnityEngine;
 
-namespace Match3.Grid
+/// <summary>
+/// Scans the grid for runs of 3+ same-type symbols, horizontally and vertically.
+/// Returns each run as its own list (Board.cs merges overlapping runs when it
+/// collects positions to clear, and inspects run length to decide special symbols).
+/// </summary>
+public static class MatchFinder
 {
-    public class MatchGroup
+    public static List<List<Vector2Int>> FindAllMatches(Cell[,] grid, int width, int height)
     {
-        public readonly List<(int x, int y)> Cells = new List<(int, int)>();
-        public int ColorId;
+        var matches = new List<List<Vector2Int>>();
 
-        /// 4+ in a straight line — a natural point to spawn a line-clear special tile.
-        public bool IsLine => Cells.Count >= 4;
-    }
-
-    public static class MatchFinder
-    {
-        /// <summary>Scans the whole board and returns every run of 3+ same-color tiles.</summary>
-        public static List<MatchGroup> FindAllMatches(BoardModel board)
+        // Horizontal runs
+        for (int y = 0; y < height; y++)
         {
-            var groups = new List<MatchGroup>();
-
-            // Horizontal runs
-            for (int y = 0; y < board.Height; y++)
+            int runStart = 0;
+            for (int x = 1; x <= width; x++)
             {
-                int runStart = 0;
-                for (int x = 1; x <= board.Width; x++)
+                bool continuesRun = x < width
+                    && !grid[x, y].IsEmpty
+                    && !grid[runStart, y].IsEmpty
+                    && grid[x, y].Occupant.Type == grid[runStart, y].Occupant.Type;
+
+                if (!continuesRun)
                 {
-                    bool sameAsPrev = x < board.Width &&
-                        !board.Get(x, y).IsEmpty && !board.Get(x - 1, y).IsEmpty &&
-                        board.Get(x, y).ColorId == board.Get(x - 1, y).ColorId;
-
-                    if (sameAsPrev) continue;
-
                     int runLength = x - runStart;
-                    if (runLength >= 3)
+                    if (runLength >= 3 && !grid[runStart, y].IsEmpty)
                     {
-                        var g = new MatchGroup { ColorId = board.Get(runStart, y).ColorId };
-                        for (int k = runStart; k < x; k++) g.Cells.Add((k, y));
-                        groups.Add(g);
+                        var line = new List<Vector2Int>(runLength);
+                        for (int k = runStart; k < x; k++) line.Add(new Vector2Int(k, y));
+                        matches.Add(line);
                     }
                     runStart = x;
                 }
             }
+        }
 
-            // Vertical runs
-            for (int x = 0; x < board.Width; x++)
+        // Vertical runs
+        for (int x = 0; x < width; x++)
+        {
+            int runStart = 0;
+            for (int y = 1; y <= height; y++)
             {
-                int runStart = 0;
-                for (int y = 1; y <= board.Height; y++)
+                bool continuesRun = y < height
+                    && !grid[x, y].IsEmpty
+                    && !grid[x, runStart].IsEmpty
+                    && grid[x, y].Occupant.Type == grid[x, runStart].Occupant.Type;
+
+                if (!continuesRun)
                 {
-                    bool sameAsPrev = y < board.Height &&
-                        !board.Get(x, y).IsEmpty && !board.Get(x, y - 1).IsEmpty &&
-                        board.Get(x, y).ColorId == board.Get(x, y - 1).ColorId;
-
-                    if (sameAsPrev) continue;
-
                     int runLength = y - runStart;
-                    if (runLength >= 3)
+                    if (runLength >= 3 && !grid[x, runStart].IsEmpty)
                     {
-                        var g = new MatchGroup { ColorId = board.Get(x, runStart).ColorId };
-                        for (int k = runStart; k < y; k++) g.Cells.Add((x, k));
-                        groups.Add(g);
+                        var line = new List<Vector2Int>(runLength);
+                        for (int k = runStart; k < y; k++) line.Add(new Vector2Int(x, k));
+                        matches.Add(line);
                     }
                     runStart = y;
                 }
             }
-
-            return groups;
         }
+
+        return matches;
     }
 }
