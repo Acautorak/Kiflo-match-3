@@ -529,7 +529,12 @@ MonoBehaviour:
   symbolParent: {fileID: 1452420351}
   swapDuration: 0.2
   fallDuration: 0.25
-  allowNonMatchingSwaps: 1
+  allowNonMatchingSwaps: 0
+  intersectionsCreateBombs: 1
+  enableRandomSpecialOnGravity: 1
+  randomSpecialTriggerChance: 0.552
+  eligibleRandomSpecialTypes: 01000000020000000300000004000000
+  maxConsecutiveRandomTriggers: 7
 --- !u!4 &835766944
 Transform:
   m_ObjectHideFlags: 0

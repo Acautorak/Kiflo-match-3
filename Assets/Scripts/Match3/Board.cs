@@ -61,6 +61,24 @@ public class Board : MonoBehaviour
              "while all their cells still clear together as one chain.")]
     [SerializeField] private bool intersectionsCreateBombs = true;
 
+    [Header("Random Special Effect (Gravity Bonus)")]
+    [Tooltip("Whenever the board settles after gravity (any clear + refill), roll a chance for " +
+             "one random tile to trigger a random special effect on its own, exactly as if it had " +
+             "been matched - clears cells, scores, and fires the same events as a real special match.")]
+    [SerializeField] private bool enableRandomSpecialOnGravity = false;
+    [Tooltip("Chance (0-1) that a bonus effect fires each time gravity settles the board.")]
+    [Range(0f, 1f)]
+    [SerializeField] private float randomSpecialTriggerChance = 0.05f;
+    [Tooltip("Which special effects can be randomly picked. Leave empty to disable even if the toggle above is on.")]
+    [SerializeField] private SpecialType[] eligibleRandomSpecialTypes =
+    {
+        SpecialType.RowClear, SpecialType.ColumnClear, SpecialType.Bomb, SpecialType.ColorClear
+    };
+    [Tooltip("Safety cap on how many bonus effects can chain back-to-back in a single settle, " +
+             "in case the chance above is set high enough to otherwise cascade indefinitely.")]
+    [Min(0)]
+    [SerializeField] private int maxConsecutiveRandomTriggers = 3;
+
     private Cell[,] grid;
     private Symbol selected;
     private bool isBusy;
@@ -319,47 +337,143 @@ public class Board : MonoBehaviour
             }
 
             yield return CollapseAndRefill();
+            yield return TryRandomSpecialOnGravity(chainCount);
             currentGroups = MatchFinder.FindMatchGroups(grid, width, height);
         }
 
         SaveSystem.Save(BuildSaveData());
     }
 
-    /// <summary>Returns every grid position this special symbol clears, and publishes the open event.</summary>
-    private Vector2Int[] ActivateSpecial(Symbol special)
+    /// <summary>Every grid position a given special effect would hit, from a given origin cell.</summary>
+    private List<Vector2Int> ComputeAffectedCells(SpecialType type, Vector2Int origin, SymbolType colorForColorClear)
     {
-        var pos = special.GridPosition;
         var affected = new List<Vector2Int>();
 
-        switch (special.Special)
+        switch (type)
         {
             case SpecialType.RowClear:
-                for (int x = 0; x < width; x++) affected.Add(new Vector2Int(x, pos.y));
+                for (int x = 0; x < width; x++) affected.Add(new Vector2Int(x, origin.y));
                 break;
             case SpecialType.ColumnClear:
-                for (int y = 0; y < height; y++) affected.Add(new Vector2Int(pos.x, y));
+                for (int y = 0; y < height; y++) affected.Add(new Vector2Int(origin.x, y));
                 break;
             case SpecialType.Bomb:
                 for (int dx = -1; dx <= 1; dx++)
                     for (int dy = -1; dy <= 1; dy++)
                     {
-                        int nx = pos.x + dx, ny = pos.y + dy;
+                        int nx = origin.x + dx, ny = origin.y + dy;
                         if (nx >= 0 && nx < width && ny >= 0 && ny < height)
                             affected.Add(new Vector2Int(nx, ny));
                     }
                 break;
             case SpecialType.ColorClear:
-                var targetType = special.Type;
                 for (int x = 0; x < width; x++)
                     for (int y = 0; y < height; y++)
-                        if (!grid[x, y].IsEmpty && grid[x, y].Occupant.Type == targetType)
+                        if (!grid[x, y].IsEmpty && grid[x, y].Occupant.Type == colorForColorClear)
                             affected.Add(new Vector2Int(x, y));
                 break;
         }
 
+        return affected;
+    }
+
+    /// <summary>Returns every grid position this special symbol clears, and publishes the open event.</summary>
+    private Vector2Int[] ActivateSpecial(Symbol special)
+    {
+        var pos = special.GridPosition;
+        var affected = ComputeAffectedCells(special.Special, pos, special.Type);
+
         // This is the "open event" for special matches - hook VFX/SFX/UI to it via SpecialSymbolEventRelay.
         EventBus.Publish(new SpecialSymbolMatchedEvent(special.Special, pos, affected.ToArray()));
         return affected.ToArray();
+    }
+
+    /// <summary>
+    /// Rolls a chance for a random tile to spontaneously trigger a random special effect,
+    /// exactly as if it had been matched (same events, same scoring, same clear/collapse).
+    /// Called after every gravity settle. Can loop multiple times per settle up to
+    /// maxConsecutiveRandomTriggers; pass forceOnce=true to guarantee exactly one trigger
+    /// (used by the Inspector test button), bypassing the toggle and chance roll.
+    /// </summary>
+    private IEnumerator TryRandomSpecialOnGravity(int chainCount, bool forceOnce = false)
+    {
+        if (eligibleRandomSpecialTypes == null || eligibleRandomSpecialTypes.Length == 0) yield break;
+        if (!forceOnce && !enableRandomSpecialOnGravity) yield break;
+
+        int triggered = 0;
+        int cap = forceOnce ? 1 : maxConsecutiveRandomTriggers;
+
+        while (triggered < cap && (forceOnce || Random.value < randomSpecialTriggerChance))
+        {
+            var candidates = new List<Vector2Int>();
+            for (int x = 0; x < width; x++)
+                for (int y = 0; y < height; y++)
+                    if (grid[x, y].Occupant != null) candidates.Add(new Vector2Int(x, y));
+
+            if (candidates.Count == 0) break;
+
+            var origin = candidates[Random.Range(0, candidates.Count)];
+            var originSymbol = grid[origin.x, origin.y].Occupant;
+            var effectType = eligibleRandomSpecialTypes[Random.Range(0, eligibleRandomSpecialTypes.Length)];
+
+            var affected = new HashSet<Vector2Int>(ComputeAffectedCells(effectType, origin, originSymbol.Type)) { origin };
+
+            Debug.Log($"[Board] Random gravity bonus: {effectType} at {origin} - clearing {affected.Count} cell(s)");
+
+            foreach (var pos in affected)
+            {
+                var occ = grid[pos.x, pos.y]?.Occupant;
+                if (occ != null) EventBus.Publish(new SymbolMatchedEvent(occ.Type, pos));
+            }
+
+            // Same open event a real special match fires - VFX/SFX hooked via SpecialSymbolEventRelay just work.
+            EventBus.Publish(new SpecialSymbolMatchedEvent(effectType, origin, affected.ToArray()));
+            EventBus.Publish(new ChainMatchedEvent(affected.Count, chainCount, affected.ToArray()));
+
+            int scoreDelta = affected.Count * 10 * chainCount;
+            currentScore += scoreDelta;
+            EventBus.Publish(new ScoreChangedEvent(currentScore, scoreDelta));
+
+            foreach (var pos in affected)
+            {
+                var occ = grid[pos.x, pos.y].Occupant;
+                if (occ == null) continue;
+                Destroy(occ.gameObject);
+                grid[pos.x, pos.y].Occupant = null;
+            }
+
+            yield return CollapseAndRefill();
+            triggered++;
+        }
+    }
+
+    [ContextMenu("Test: Trigger Random Gravity Bonus Now")]
+    private void TestTriggerRandomGravityBonus()
+    {
+        if (!Application.isPlaying)
+        {
+            Debug.LogWarning("[Board] This only works in Play mode.");
+            return;
+        }
+        if (eligibleRandomSpecialTypes == null || eligibleRandomSpecialTypes.Length == 0)
+        {
+            Debug.LogWarning("[Board] Assign at least one entry in Eligible Random Special Types first.");
+            return;
+        }
+        StartCoroutine(ForceRandomGravityBonus());
+    }
+
+    private IEnumerator ForceRandomGravityBonus()
+    {
+        isBusy = true;
+        yield return TryRandomSpecialOnGravity(chainCount: 1, forceOnce: true);
+
+        // A forced bonus can itself create a fresh match (e.g. a color-clear leaving 3 in a
+        // row after refill) - resolve that too, same as it would during normal play.
+        var groups = MatchFinder.FindMatchGroups(grid, width, height);
+        if (groups.Count > 0) yield return ResolveMatches(groups);
+
+        isBusy = false;
     }
 
     #endregion
