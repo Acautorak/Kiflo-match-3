@@ -55,6 +55,11 @@ public class Board : MonoBehaviour
     [Tooltip("If true, any adjacent swap completes and stays, even if it doesn't create a match. " +
              "If false, swaps that don't create a match are reverted (classic match-3 behavior).")]
     [SerializeField] private bool allowNonMatchingSwaps = true;
+    [Tooltip("If true, an L/T-shaped intersection (two runs crossing) creates one Bomb special " +
+             "and the individual run lengths are ignored. If false, each run in the group creates " +
+             "its own special independently (e.g. two crossing 4-runs each become a line-clear), " +
+             "while all their cells still clear together as one chain.")]
+    [SerializeField] private bool intersectionsCreateBombs = true;
 
     private Cell[,] grid;
     private Symbol selected;
@@ -85,6 +90,24 @@ public class Board : MonoBehaviour
             Debug.Log(saved == null ? "[Board] No save found, populating fresh board" : "[Board] Save size mismatch, populating fresh board");
             PopulateBoard();
         }
+
+        StartCoroutine(ResolveAnyExistingMatches());
+    }
+
+    /// <summary>
+    /// Safety net: verifies the board right after populate/load and clears anything that's
+    /// already matched. Guards against stale/corrupt saves (e.g. captured mid-cascade, or
+    /// from an older build) silently persisting an unresolved match forever.
+    /// </summary>
+    private IEnumerator ResolveAnyExistingMatches()
+    {
+        var groups = MatchFinder.FindMatchGroups(grid, width, height);
+        if (groups.Count == 0) yield break;
+
+        Debug.Log($"[Board] Found {groups.Count} pre-existing match group(s) on start - resolving.");
+        isBusy = true;
+        yield return ResolveMatches(groups);
+        isBusy = false;
     }
 
     #region Setup
@@ -168,6 +191,9 @@ public class Board : MonoBehaviour
         yield return SwapRoutine(a, b);
 
         var matchGroups = MatchFinder.FindMatchGroups(grid, width, height);
+        Debug.Log($"[Board] Post-swap scan: {matchGroups.Count} group(s) - " +
+                   string.Join(" | ", matchGroups.Select(g =>
+                       $"cells={g.Cells.Count} lines={g.Lines.Count} intersection={g.IsIntersection} longestRun={g.LongestRun}")));
         if (matchGroups.Count == 0)
         {
             if (!allowNonMatchingSwaps)
@@ -211,31 +237,44 @@ public class Board : MonoBehaviour
         while (currentGroups.Count > 0)
         {
             chainCount++;
+            Debug.Log($"[Board] Cascade step {chainCount}: {currentGroups.Count} group(s) - " +
+                       string.Join(" | ", currentGroups.Select(g =>
+                           $"cells={g.Cells.Count} intersection={g.IsIntersection} longestRun={g.LongestRun} seed={g.GetSeedCell()}")));
 
             var allPositions = new HashSet<Vector2Int>();
-            var specialsToCreate = new List<(Vector2Int pos, SpecialType special, SymbolType type)>();
+            var specialsToCreate = new Dictionary<Vector2Int, (SpecialType special, SymbolType type)>();
 
             foreach (var group in currentGroups)
             {
                 foreach (var p in group.Cells) allPositions.Add(p);
 
-                var seed = group.GetSeedCell();
-                var seedType = grid[seed.x, seed.y].Occupant.Type;
+                if (group.IsIntersection && intersectionsCreateBombs)
+                {
+                    var seed = group.GetSeedCell();
+                    var seedType = grid[seed.x, seed.y].Occupant.Type;
+                    specialsToCreate[seed] = (SpecialType.Bomb, seedType);
+                }
+                else
+                {
+                    // Not treating this as a bomb (either a straight run, or intersections-as-bomb
+                    // is disabled) - let each constituent run create its own special independently.
+                    foreach (var line in group.Lines)
+                    {
+                        if (line.Count < 4) continue;
 
-                if (group.IsIntersection)
-                {
-                    // Two runs crossing (L/T/plus shape) -> Bomb at the intersection cell.
-                    specialsToCreate.Add((seed, SpecialType.Bomb, seedType));
-                }
-                else if (group.LongestRun >= 5)
-                {
-                    specialsToCreate.Add((seed, SpecialType.ColorClear, seedType));
-                }
-                else if (group.LongestRun == 4)
-                {
-                    var line = group.Lines[0];
-                    bool horizontal = line[0].y == line[1].y;
-                    specialsToCreate.Add((seed, horizontal ? SpecialType.RowClear : SpecialType.ColumnClear, seedType));
+                        var seed = line[line.Count / 2];
+                        var seedType = grid[seed.x, seed.y].Occupant.Type;
+
+                        if (line.Count >= 5)
+                        {
+                            specialsToCreate[seed] = (SpecialType.ColorClear, seedType);
+                        }
+                        else
+                        {
+                            bool horizontal = line[0].y == line[1].y;
+                            specialsToCreate[seed] = (horizontal ? SpecialType.RowClear : SpecialType.ColumnClear, seedType);
+                        }
+                    }
                 }
             }
 
@@ -262,22 +301,21 @@ public class Board : MonoBehaviour
             EventBus.Publish(new ScoreChangedEvent(currentScore, scoreDelta));
 
             // Clear matched cells, but skip the seed cells that are becoming specials.
-            var specialPositions = specialsToCreate.Select(s => s.pos).ToHashSet();
             foreach (var pos in allPositions)
             {
-                if (specialPositions.Contains(pos)) continue;
+                if (specialsToCreate.ContainsKey(pos)) continue;
                 var occ = grid[pos.x, pos.y].Occupant;
                 if (occ == null) continue;
                 Destroy(occ.gameObject);
                 grid[pos.x, pos.y].Occupant = null;
             }
 
-            foreach (var (pos, special, type) in specialsToCreate)
+            foreach (var (pos, info) in specialsToCreate)
             {
                 var existing = grid[pos.x, pos.y].Occupant;
                 if (existing != null) Destroy(existing.gameObject);
-                SpawnSymbol(pos.x, pos.y, type, special);
-                EventBus.Publish(new SpecialSymbolCreatedEvent(special, pos));
+                SpawnSymbol(pos.x, pos.y, info.type, info.special);
+                EventBus.Publish(new SpecialSymbolCreatedEvent(info.special, pos));
             }
 
             yield return CollapseAndRefill();

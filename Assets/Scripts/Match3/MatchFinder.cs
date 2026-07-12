@@ -84,62 +84,94 @@ public static class MatchFinder
         return byRoot.Values.ToList();
     }
 
-    /// <summary>Raw straight-line runs of 3+, before merging. Exposed in case you need unmerged data.</summary>
+    /// <summary>
+    /// Raw straight-line runs of 3+, before merging. A cell whose Special != None is a
+    /// wildcard: it doesn't force its own SymbolType, it just extends whatever color run
+    /// it's touching (so Red, Red, Bomb counts as a 3-run of Red; Bomb, Bomb, Bomb alone
+    /// also counts, with no particular color required).
+    /// </summary>
     public static List<List<Vector2Int>> FindRuns(Cell[,] grid, int width, int height)
     {
         var matches = new List<List<Vector2Int>>();
 
-        // Horizontal runs
         for (int y = 0; y < height; y++)
         {
-            int runStart = 0;
-            for (int x = 1; x <= width; x++)
-            {
-                bool continuesRun = x < width
-                    && !grid[x, y].IsEmpty
-                    && !grid[runStart, y].IsEmpty
-                    && grid[x, y].Occupant.Type == grid[runStart, y].Occupant.Type;
-
-                if (!continuesRun)
-                {
-                    int runLength = x - runStart;
-                    if (runLength >= 3 && !grid[runStart, y].IsEmpty)
-                    {
-                        var line = new List<Vector2Int>(runLength);
-                        for (int k = runStart; k < x; k++) line.Add(new Vector2Int(k, y));
-                        matches.Add(line);
-                    }
-                    runStart = x;
-                }
-            }
+            int yCopy = y;
+            matches.AddRange(ScanLine(width, x => grid[x, yCopy].IsEmpty ? null : grid[x, yCopy].Occupant, x => new Vector2Int(x, yCopy)));
         }
 
-        // Vertical runs
         for (int x = 0; x < width; x++)
         {
-            int runStart = 0;
-            for (int y = 1; y <= height; y++)
-            {
-                bool continuesRun = y < height
-                    && !grid[x, y].IsEmpty
-                    && !grid[x, runStart].IsEmpty
-                    && grid[x, y].Occupant.Type == grid[x, runStart].Occupant.Type;
-
-                if (!continuesRun)
-                {
-                    int runLength = y - runStart;
-                    if (runLength >= 3 && !grid[x, runStart].IsEmpty)
-                    {
-                        var line = new List<Vector2Int>(runLength);
-                        for (int k = runStart; k < y; k++) line.Add(new Vector2Int(x, k));
-                        matches.Add(line);
-                    }
-                    runStart = y;
-                }
-            }
+            int xCopy = x;
+            matches.AddRange(ScanLine(height, y => grid[xCopy, y].IsEmpty ? null : grid[xCopy, y].Occupant, y => new Vector2Int(xCopy, y)));
         }
 
         return matches;
+    }
+
+    /// <summary>
+    /// Scans one row or column (via the given accessors) and returns every run of 3+ cells
+    /// that share a color, where special (wildcard) symbols extend a run regardless of their
+    /// own underlying SymbolType. Trailing wildcards at a run boundary carry forward into the
+    /// next run instead of being discarded, so a wildcard sandwiched between an invalid short
+    /// run and a valid one on the other side still gets picked up (e.g. Strawberry, Clear,
+    /// Chocolate, Chocolate -> the single Strawberry doesn't "use up" Clear; Clear joins the
+    /// chocolates instead).
+    /// </summary>
+    private static List<List<Vector2Int>> ScanLine(int length, System.Func<int, Symbol> getSymbol, System.Func<int, Vector2Int> toCoord)
+    {
+        var result = new List<List<Vector2Int>>();
+        var current = new List<(Vector2Int coord, bool isWildcard)>();
+        SymbolType? anchor = null;
+
+        void Flush()
+        {
+            if (current.Count >= 3)
+                result.Add(current.Select(c => c.coord).ToList());
+
+            int carry = 0;
+            while (carry < current.Count && current[current.Count - 1 - carry].isWildcard) carry++;
+            current = current.GetRange(current.Count - carry, carry);
+            anchor = null;
+        }
+
+        for (int i = 0; i < length; i++)
+        {
+            var symbol = getSymbol(i);
+            if (symbol == null)
+            {
+                Flush();
+                current.Clear(); // a genuine empty cell fully breaks the run, wildcards included
+                continue;
+            }
+
+            if (symbol.Special != SpecialType.None)
+            {
+                // Wildcard: joins the current run no matter what color it's carrying.
+                current.Add((toCoord(i), true));
+                continue;
+            }
+
+            if (anchor == null)
+            {
+                anchor = symbol.Type;
+                current.Add((toCoord(i), false));
+            }
+            else if (symbol.Type == anchor.Value)
+            {
+                current.Add((toCoord(i), false));
+            }
+            else
+            {
+                Flush();
+                anchor = symbol.Type;
+                current.Add((toCoord(i), false));
+            }
+        }
+
+        if (current.Count >= 3) result.Add(current.Select(c => c.coord).ToList());
+
+        return result;
     }
 }
 
