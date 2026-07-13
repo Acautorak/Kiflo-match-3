@@ -6,6 +6,10 @@ public class BoardSaveData
     public int width;
     public int height;
     public int score;
+    public int moveCount;
+    public int currentHealth;
+    public int maxHealth;
+    public int currentStageIndex;
     public CellSaveData[] cells; // flattened, index = x * height + y
 }
 

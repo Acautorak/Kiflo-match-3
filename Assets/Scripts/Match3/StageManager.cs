@@ -5,8 +5,8 @@ public class StageManager : MonoBehaviour
 {
     [Header("Stage Setup")]
     [SerializeField] private Board board;
+    [SerializeField] private PlayerHealth playerHealth;
     [SerializeField] private StageDefinition[] stages;
-    [SerializeField] private float stageClearDelay = 1.5f;
     [SerializeField] private bool autoStartFirstStage = true;
 
     private int currentStageIndex = -1;
@@ -14,6 +14,7 @@ public class StageManager : MonoBehaviour
 
     public int CurrentStageIndex => currentStageIndex;
     private bool isTransitioning;
+    private bool isStageCleared;
 
    
 
@@ -21,21 +22,47 @@ public class StageManager : MonoBehaviour
     {
         EventBus.Subscribe<ScoreChangedEvent>(HandleScoreChanged);
         EventBus.Subscribe<PlayerMoveEvent>(HandlePlayerMove);
+        EventBus.Subscribe<GameOverEvent>(HandleGameOver);
     }
 
     private void OnDisable()
     {
         EventBus.Unsubscribe<ScoreChangedEvent>(HandleScoreChanged);
         EventBus.Unsubscribe<PlayerMoveEvent>(HandlePlayerMove);
+        EventBus.Unsubscribe<GameOverEvent>(HandleGameOver);
     }
 
     private void Start()
     {
-        if (autoStartFirstStage)
-            StartStage(0);
+        if (!autoStartFirstStage) return;
+
+        var saved = SaveSystem.Load();
+        if (saved != null && saved.currentStageIndex >= 0 && saved.currentStageIndex < stages.Length)
+        {
+            currentStageIndex = saved.currentStageIndex;
+            currentStage = stages[currentStageIndex];
+            isTransitioning = false;
+            isStageCleared = false;
+            EventBus.Publish(new StageStartedEvent(currentStageIndex, currentStage));
+            Debug.Log($"[StageManager] Restored saved stage {currentStageIndex + 1}: {currentStage.name}");
+            return;
+        }
+
+        StartStage(0);
     }
 
     public bool HasStagesConfigured() => stages != null && stages.Length > 0;
+
+    public void LoadStageState(int index)
+    {
+        if (index < 0 || index >= stages.Length)
+            return;
+
+        currentStageIndex = index;
+        currentStage = stages[index];
+        isTransitioning = false;
+        isStageCleared = false;
+    }
 
     public void StartStage(int index)
     {
@@ -54,6 +81,7 @@ public class StageManager : MonoBehaviour
         currentStageIndex = index;
         currentStage = stages[index];
         isTransitioning = false;
+        isStageCleared = false;
 
         if (board != null)
             board.ResetForStage(currentStage);
@@ -66,7 +94,7 @@ public class StageManager : MonoBehaviour
     {
         if (stages == null || stages.Length == 0) return;
         if (currentStageIndex < 0) return;
-        if (isTransitioning) return;
+        if (!isStageCleared) return;
 
         var nextIndex = currentStageIndex + 1;
         if (nextIndex >= stages.Length)
@@ -75,22 +103,24 @@ public class StageManager : MonoBehaviour
             return;
         }
 
-        StartCoroutine(TransitionToStage(nextIndex));
+        if (board != null)
+            board.ClearBoard();
+
+        StartStage(nextIndex);
     }
 
-    private IEnumerator TransitionToStage(int nextIndex)
+    public void StartNewRun()
     {
-        isTransitioning = true;
-        EventBus.Publish(new StageCompletedEvent(currentStageIndex, board != null ? board.CurrentScore : 0));
-
-        if (board != null)
+        if (playerHealth != null)
         {
-            board.ClearBoard();
-            Debug.Log($"[StageManager] Cleared previous stage symbols before transitioning to stage {nextIndex + 1}.");
+            playerHealth.ResetForNewRun();
+            EventBus.Publish(new HealthChangedEvent(playerHealth.CurrentHealth, playerHealth.MaxHealth));
         }
 
-        yield return new WaitForSeconds(stageClearDelay);
-        StartStage(nextIndex);
+        if (board != null)
+            board.ClearBoard();
+
+        StartStage(0);
     }
 
     private void HandleScoreChanged(ScoreChangedEvent evt)
@@ -115,9 +145,26 @@ public class StageManager : MonoBehaviour
         if (currentStage.goalType == StageGoalType.None)
             return;
 
-        if (board != null)
-            Debug.Log($"[StageManager] Stage {currentStageIndex + 1} complete with score {board.CurrentScore} and {board.MoveCount} moves.");
+        isTransitioning = true;
+        isStageCleared = true;
 
-        AdvanceToNextStage();
+        if (board != null)
+        {
+            Debug.Log($"[StageManager] Stage {currentStageIndex + 1} complete with score {board.CurrentScore} and {board.MoveCount} moves.");
+            board.BeginStageClearCleanup(() =>
+            {
+                EventBus.Publish(new StageCompletedEvent(currentStageIndex, board.CurrentScore));
+            });
+        }
+        else
+        {
+            EventBus.Publish(new StageCompletedEvent(currentStageIndex, 0));
+        }
+    }
+
+    private void HandleGameOver(GameOverEvent evt)
+    {
+        isTransitioning = true;
+        Debug.Log("[StageManager] Player lost. Start a new run from the UI.");
     }
 }

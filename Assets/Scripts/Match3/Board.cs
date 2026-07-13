@@ -55,8 +55,6 @@ public class Board : MonoBehaviour
     [Tooltip("If true, any adjacent swap completes and stays, even if it doesn't create a match. " +
              "If false, swaps that don't create a match are reverted (classic match-3 behavior).")]
     [SerializeField] private bool allowNonMatchingSwaps = true;
-    [Tooltip("Starting health for the player each stage. Non-matching moves reduce health by 1.")]
-    [Min(1)] [SerializeField] private int maxHealth = 5;
     [Tooltip("If true, an L/T-shaped intersection (two runs crossing) creates one Bomb special " +
              "and the individual run lengths are ignored. If false, each run in the group creates " +
              "its own special independently (e.g. two crossing 4-runs each become a line-clear), " +
@@ -111,20 +109,20 @@ public class Board : MonoBehaviour
     private Cell[,] grid;
     private Symbol selected;
     private bool isBusy;
+    private bool isStageClearing;
     private int currentScore;
     private int moveCount;
-    private int currentHealth;
+    private bool hasLoadedSavedState;
 
     public int MoveCount => moveCount;
     public int CurrentScore => currentScore;
-    public int CurrentHealth => currentHealth;
-    public int MaxHealth => maxHealth;
+    public bool IsGameBusy => isBusy || isStageClearing;
+    public bool HasLoadedSavedState => hasLoadedSavedState;
 
     private void Awake()
     {
         Instance = this;
         Debug.Log($"[Board] Awake - grid {width}x{height}");
-        currentHealth = maxHealth;
         grid = new Cell[width, height];
         for (int x = 0; x < width; x++)
             for (int y = 0; y < height; y++)
@@ -135,23 +133,18 @@ public class Board : MonoBehaviour
     {
         Debug.Log("[Board] Start");
 
-        var stageManager = FindObjectOfType<StageManager>();
-        if (stageManager != null && stageManager.HasStagesConfigured())
-        {
-            Debug.Log("[Board] StageManager detected; deferring initial board population to stage setup.");
-            return;
-        }
-
         var saved = SaveSystem.Load();
         if (saved != null && saved.width == width && saved.height == height)
         {
             Debug.Log("[Board] Loading from save");
             LoadFromSave(saved);
+            hasLoadedSavedState = true;
         }
         else
         {
             Debug.Log(saved == null ? "[Board] No save found, populating fresh board" : "[Board] Save size mismatch, populating fresh board");
             PopulateBoard();
+            hasLoadedSavedState = false;
         }
 
         StartCoroutine(ResolveAnyExistingMatches());
@@ -201,20 +194,27 @@ public class Board : MonoBehaviour
         moveCount = 0;
         selected = null;
         isBusy = false;
-        currentHealth = maxHealth;
+        isStageClearing = false;
         EventBus.Publish(new ScoreChangedEvent(currentScore, 0));
-        EventBus.Publish(new HealthChangedEvent(currentHealth, maxHealth));
     }
 
     public void ResetForStage(StageDefinition stage)
     {
         ClearBoard();
         ApplyStageRules(stage);
-        currentHealth = maxHealth;
-        EventBus.Publish(new HealthChangedEvent(currentHealth, maxHealth));
         PopulateBoard();
-        SaveSystem.DeleteSave();
+        hasLoadedSavedState = false;
+        SaveNow();
         StartCoroutine(ResolveAnyExistingMatches());
+    }
+
+    public void BeginStageClearCleanup(System.Action onComplete)
+    {
+        if (isStageClearing) return;
+
+        isStageClearing = true;
+        isBusy = true;
+        StartCoroutine(ExplodeRemainingSymbols(onComplete));
     }
 
     private void ApplyStageRules(StageDefinition stage)
@@ -316,7 +316,7 @@ public class Board : MonoBehaviour
 
     public void SelectSymbol(Symbol symbol)
     {
-        if (isBusy) return;
+        if (IsGameBusy) return;
 
         if (symbol.IsLocked && !allowSwappingLockedTiles)
         {
@@ -383,9 +383,9 @@ public class Board : MonoBehaviour
 
     private void ApplyHealthPenalty(int amount = 1)
     {
-        if (currentHealth <= 0) return;
-        currentHealth = Mathf.Max(0, currentHealth - amount);
-        EventBus.Publish(new HealthChangedEvent(currentHealth, maxHealth));
+        var health = FindObjectOfType<PlayerHealth>();
+        if (health != null)
+            health.TakeDamage(amount);
     }
 
     private IEnumerator SwapRoutine(Symbol a, Symbol b)
@@ -449,6 +449,8 @@ public class Board : MonoBehaviour
 
         while (currentGroups.Count > 0)
         {
+            if (isStageClearing) break;
+
             chainCount++;
             Debug.Log($"[Board] Cascade step {chainCount}: {currentGroups.Count} group(s) - " +
                        string.Join(" | ", currentGroups.Select(g =>
@@ -507,6 +509,8 @@ public class Board : MonoBehaviour
                 EventBus.Publish(new SpecialSymbolCreatedEvent(info.special, pos));
             }
 
+            if (isStageClearing) break;
+
             yield return CollapseAndRefill();
             yield return TryRandomSpecialOnGravity(chainCount);
             currentGroups = MatchFinder.FindMatchGroups(grid, width, height);
@@ -550,6 +554,37 @@ public class Board : MonoBehaviour
     {
         var seedType = grid[seed.x, seed.y].Occupant?.Type ?? SymbolType.Red;
         specialsToCreate[seed] = (special, seedType);
+    }
+
+    private IEnumerator ExplodeRemainingSymbols(System.Action onComplete)
+    {
+        var remaining = new List<Symbol>();
+        for (int x = 0; x < width; x++)
+            for (int y = 0; y < height; y++)
+            {
+                var occ = grid[x, y].Occupant;
+                if (occ != null)
+                    remaining.Add(occ);
+            }
+
+        for (int i = 0; i < remaining.Count; i++)
+        {
+            var symbol = remaining[i];
+            if (symbol == null) continue;
+
+            var pos = symbol.GridPosition;
+            if (grid[pos.x, pos.y].Occupant == symbol)
+                grid[pos.x, pos.y].Occupant = null;
+
+            symbol.transform.DOScale(0.15f, 0.15f).SetEase(Ease.InBack);
+            symbol.transform.DOScale(0f, 0.15f).SetEase(Ease.InBack);
+            Destroy(symbol.gameObject, 0.3f);
+            yield return new WaitForSeconds(0.25f);
+        }
+
+        isBusy = false;
+        isStageClearing = false;
+        onComplete?.Invoke();
     }
 
     /// <summary>Every grid position a given special effect would hit, from a given origin cell.</summary>
@@ -910,11 +945,18 @@ public class Board : MonoBehaviour
 
     private BoardSaveData BuildSaveData()
     {
+        var stageManager = FindObjectOfType<StageManager>();
+        var health = FindObjectOfType<PlayerHealth>();
+
         var data = new BoardSaveData
         {
             width = width,
             height = height,
             score = currentScore,
+            moveCount = moveCount,
+            currentHealth = health != null ? health.CurrentHealth : 0,
+            maxHealth = health != null ? health.MaxHealth : 0,
+            currentStageIndex = stageManager != null ? stageManager.CurrentStageIndex : -1,
             cells = new CellSaveData[width * height]
         };
 
@@ -941,7 +983,21 @@ public class Board : MonoBehaviour
 
     private void LoadFromSave(BoardSaveData data)
     {
+        ClearExistingSymbols();
         currentScore = data.score;
+        moveCount = data.moveCount;
+        selected = null;
+        isBusy = false;
+        isStageClearing = false;
+
+        var health = FindObjectOfType<PlayerHealth>();
+        if (health != null)
+        {
+            health.ResetForNewRun();
+            if (data.maxHealth > 0)
+                health.SetHealth(data.currentHealth, data.maxHealth);
+        }
+
         for (int x = 0; x < width; x++)
             for (int y = 0; y < height; y++)
             {
@@ -953,7 +1009,12 @@ public class Board : MonoBehaviour
                     symbol.RestoreLockState(cellData.lockLayers, cellData.lockBehavior, cellData.movesPerLayer, cellData.movesUntilNextAutoUnlock);
             }
 
+        var stageManager = FindObjectOfType<StageManager>();
+        if (stageManager != null && data.currentStageIndex >= 0)
+            stageManager.LoadStageState(data.currentStageIndex);
+
         EventBus.Publish(new ScoreChangedEvent(currentScore, 0));
+        EventBus.Publish(new PlayerMoveEvent(moveCount));
     }
 
     /// <summary>Call this from GameManager on pause/quit for a simple, reliable save point.</summary>
