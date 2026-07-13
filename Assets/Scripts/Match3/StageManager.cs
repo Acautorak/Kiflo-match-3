@@ -6,6 +6,7 @@ public class StageManager : MonoBehaviour
     [Header("Stage Setup")]
     [SerializeField] private Board board;
     [SerializeField] private PlayerHealth playerHealth;
+    [SerializeField] private GameManager gameManager;
     [SerializeField] private StageDefinition[] stages;
     [SerializeField] private bool autoStartFirstStage = true;
 
@@ -15,6 +16,8 @@ public class StageManager : MonoBehaviour
     public int CurrentStageIndex => currentStageIndex;
     private bool isTransitioning;
     private bool isStageCleared;
+    private bool isStageClearPending;
+    private int remainingGraceMoves;
 
    
 
@@ -82,6 +85,11 @@ public class StageManager : MonoBehaviour
         currentStage = stages[index];
         isTransitioning = false;
         isStageCleared = false;
+        isStageClearPending = false;
+        remainingGraceMoves = 0;
+
+        if (gameManager != null)
+            gameManager.SetState(GameManager.GameplayState.Playing);
 
         if (board != null)
             board.ResetForStage(currentStage);
@@ -123,6 +131,30 @@ public class StageManager : MonoBehaviour
         StartStage(0);
     }
 
+    public void FinalizeStageClear()
+    {
+        if (currentStage == null || !isStageClearPending || isStageCleared) return;
+
+        isStageCleared = true;
+        isStageClearPending = false;
+
+        if (gameManager != null)
+            gameManager.SetState(GameManager.GameplayState.StageClearing);
+
+        if (board != null)
+        {
+            Debug.Log($"[StageManager] Stage {currentStageIndex + 1} clearing after grace period.");
+            board.BeginStageClearCleanup(() =>
+            {
+                EventBus.Publish(new StageCompletedEvent(currentStageIndex, board.CurrentScore));
+            });
+        }
+        else
+        {
+            EventBus.Publish(new StageCompletedEvent(currentStageIndex, 0));
+        }
+    }
+
     private void HandleScoreChanged(ScoreChangedEvent evt)
     {
         if (currentStage == null) return;
@@ -141,30 +173,46 @@ public class StageManager : MonoBehaviour
 
     private void CompleteStage()
     {
-        if (currentStage == null || isTransitioning) return;
+        if (currentStage == null || isTransitioning || isStageClearPending) return;
         if (currentStage.goalType == StageGoalType.None)
             return;
 
         isTransitioning = true;
-        isStageCleared = true;
+        isStageClearPending = true;
+        isStageCleared = false;
+        remainingGraceMoves = currentStage != null ? currentStage.gracePeriodMoves : 3;
+
+        if (gameManager != null)
+            gameManager.SetState(GameManager.GameplayState.GracePeriod);
+
+        if (board != null)
+            board.SetGraceStateActive(true);
 
         if (board != null)
         {
-            Debug.Log($"[StageManager] Stage {currentStageIndex + 1} complete with score {board.CurrentScore} and {board.MoveCount} moves.");
-            board.BeginStageClearCleanup(() =>
-            {
-                EventBus.Publish(new StageCompletedEvent(currentStageIndex, board.CurrentScore));
-            });
+            Debug.Log($"[StageManager] Stage {currentStageIndex + 1} goal reached. Player has {remainingGraceMoves} extra moves before clear.");
+            board.BeginStageClearGracePeriod(remainingGraceMoves, currentStage != null ? currentStage.gracePeriodRandomSpecialChance : 0f);
         }
         else
         {
-            EventBus.Publish(new StageCompletedEvent(currentStageIndex, 0));
+            FinalizeStageClear();
         }
+    }
+
+    public void ConsumeStageClearGraceMove()
+    {
+        if (!isStageClearPending || remainingGraceMoves <= 0) return;
+
+        remainingGraceMoves--;
+        if (remainingGraceMoves <= 0)
+            FinalizeStageClear();
     }
 
     private void HandleGameOver(GameOverEvent evt)
     {
         isTransitioning = true;
+        if (gameManager != null)
+            gameManager.SetState(GameManager.GameplayState.StageClearing);
         Debug.Log("[StageManager] Player lost. Start a new run from the UI.");
     }
 }

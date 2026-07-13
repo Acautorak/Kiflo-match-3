@@ -14,6 +14,11 @@ public class StageDefinition
     public bool enableRandomSpecialOnGravity = false;
     public bool spawnLocksOnRefill = false;
     public bool destroySymbolWhenUnlocked = true;
+    public bool lockedTilesFallWithGravity = false;
+    public FrozenTileSpawnMode frozenTileSpawnMode = FrozenTileSpawnMode.None;
+    [Min(0)] public int frozenTileBottomRowCount = 0;
+    [Min(0)] public int gracePeriodMoves = 3;
+    [Range(0f, 1f)] public float gracePeriodRandomSpecialChance = 0f;
     [Range(0f, 1f)] public float randomSpecialChance = 0.05f;
     [Min(0)] public int maxConsecutiveRandomTriggers = 3;
     [Range(0f, 1f)] public float lockSpawnChance = 0.05f;
@@ -24,4 +29,12 @@ public enum StageGoalType
     None,
     Score,
     MoveCount
+}
+
+public enum FrozenTileSpawnMode
+{
+    None,
+    GenerateNewFrozenTiles,
+    FreezeExistingBottomRows,
+    Both
 }

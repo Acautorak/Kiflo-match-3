@@ -1367,6 +1367,9 @@ MonoBehaviour:
   eligibleRandomSpecialTypes: 01000000020000000300000004000000
   maxConsecutiveRandomTriggers: 7
   destroySymbolWhenUnlocked: 1
+  lockedTilesFallWithGravity: 0
+  frozenTileSpawnMode: 0
+  frozenTileBottomRowCount: 0
   scorePerLockHit: 5
   allowSwappingLockedTiles: 0
   initialLockPlacements:
@@ -1438,6 +1441,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::GameManager
   board: {fileID: 835766943}
+  stageManager: {fileID: 1209139336}
 --- !u!4 &847598081
 Transform:
   m_ObjectHideFlags: 0
@@ -1906,30 +1910,57 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::StageManager
   board: {fileID: 835766943}
-  playerHealth: {fileID: 0}
+  playerHealth: {fileID: 1311149858}
+  gameManager: {fileID: 847598080}
   stages:
   - name: 
     description: 
     goalType: 2
     goalValue: 6
-    allowNonMatchingSwaps: 1
+    allowNonMatchingSwaps: 0
     enableRandomSpecialOnGravity: 1
     spawnLocksOnRefill: 0
     destroySymbolWhenUnlocked: 1
+    lockedTilesFallWithGravity: 0
+    frozenTileSpawnMode: 2
+    frozenTileBottomRowCount: 4
+    gracePeriodMoves: 3
+    gracePeriodRandomSpecialChance: 0.538
     randomSpecialChance: 0.225
     maxConsecutiveRandomTriggers: 7
     lockSpawnChance: 0.0014999999
   - name: 
     description: 
     goalType: 1
-    goalValue: 1000000
+    goalValue: 100000
     allowNonMatchingSwaps: 1
     enableRandomSpecialOnGravity: 1
     spawnLocksOnRefill: 1
     destroySymbolWhenUnlocked: 0
-    randomSpecialChance: 0.247
+    lockedTilesFallWithGravity: 0
+    frozenTileSpawnMode: 2
+    frozenTileBottomRowCount: 2
+    gracePeriodMoves: 3
+    gracePeriodRandomSpecialChance: 0.522
+    randomSpecialChance: 0.489
     maxConsecutiveRandomTriggers: 6
     lockSpawnChance: 0.044
+  - name: 
+    description: 
+    goalType: 1
+    goalValue: 15000
+    allowNonMatchingSwaps: 0
+    enableRandomSpecialOnGravity: 1
+    spawnLocksOnRefill: 1
+    destroySymbolWhenUnlocked: 1
+    lockedTilesFallWithGravity: 0
+    frozenTileSpawnMode: 3
+    frozenTileBottomRowCount: 5
+    gracePeriodMoves: 3
+    gracePeriodRandomSpecialChance: 0.659
+    randomSpecialChance: 0.313
+    maxConsecutiveRandomTriggers: 4
+    lockSpawnChance: 0
   autoStartFirstStage: 1
 --- !u!4 &1209139337
 Transform:

@@ -84,6 +84,12 @@ public class Board : MonoBehaviour
              "(classic 'destroy to unlock' obstacle behavior). If false, the lock just falls away " +
              "and the tile becomes a normal free tile, staying on the board.")]
     [SerializeField] private bool destroySymbolWhenUnlocked = true;
+    [Tooltip("If true, locked/frozen tiles obey gravity and can fall during collapse/refill. If false, they stay fixed and act as a floor.")]
+    [SerializeField] private bool lockedTilesFallWithGravity = false;
+    [Tooltip("Controls whether frozen tiles can be introduced during refill.")]
+    [SerializeField] private FrozenTileSpawnMode frozenTileSpawnMode = FrozenTileSpawnMode.None;
+    [Tooltip("If greater than 0, any newly spawned frozen tiles are only allowed in the bottom N rows of the board.")]
+    [SerializeField] private int frozenTileBottomRowCount = 0;
     [Tooltip("Score bonus awarded each time a lock takes a hit from a match/special effect, whether " +
              "or not it fully breaks this hit. Auto-melt hits (from moves) don't award this.")]
     [SerializeField] private int scorePerLockHit = 5;
@@ -111,7 +117,12 @@ public class Board : MonoBehaviour
     private bool isBusy;
     private bool isStageClearing;
     private int currentScore;
+    private GameManager gameManager;
     private int moveCount;
+    private bool stageClearGraceActive;
+    private int stageClearGraceMovesRemaining;
+    private float stageClearGraceRandomSpecialChance;
+    private bool stageClearPendingAfterResolution;
     private bool hasLoadedSavedState;
 
     public int MoveCount => moveCount;
@@ -122,6 +133,7 @@ public class Board : MonoBehaviour
     private void Awake()
     {
         Instance = this;
+        gameManager = FindAnyObjectByType<GameManager>();
         Debug.Log($"[Board] Awake - grid {width}x{height}");
         grid = new Cell[width, height];
         for (int x = 0; x < width; x++)
@@ -195,6 +207,7 @@ public class Board : MonoBehaviour
         selected = null;
         isBusy = false;
         isStageClearing = false;
+        ResetStageClearGraceState();
         EventBus.Publish(new ScoreChangedEvent(currentScore, 0));
     }
 
@@ -206,6 +219,59 @@ public class Board : MonoBehaviour
         hasLoadedSavedState = false;
         SaveNow();
         StartCoroutine(ResolveAnyExistingMatches());
+    }
+
+    public void BeginStageClearGracePeriod(int extraMoves = 3, float randomSpecialChance = 0f)
+    {
+        stageClearGraceActive = true;
+        stageClearGraceMovesRemaining = Mathf.Max(0, extraMoves);
+        stageClearGraceRandomSpecialChance = randomSpecialChance;
+        stageClearPendingAfterResolution = false;
+    }
+
+    public void SetGraceStateActive(bool active)
+    {
+        stageClearGraceActive = active;
+        if (!active)
+        {
+            stageClearGraceMovesRemaining = 0;
+            stageClearGraceRandomSpecialChance = 0f;
+            stageClearPendingAfterResolution = false;
+        }
+    }
+
+    public void ResetStageClearGraceState()
+    {
+        stageClearGraceActive = false;
+        stageClearGraceMovesRemaining = 0;
+        stageClearGraceRandomSpecialChance = 0f;
+        stageClearPendingAfterResolution = false;
+    }
+
+    private bool ShouldSkipRefillGeneration()
+    {
+        if (stageClearGraceActive && stageClearGraceMovesRemaining > 0) return true;
+        if (stageClearPendingAfterResolution) return true;
+        if (gameManager != null && gameManager.CurrentState == GameManager.GameplayState.StageClearing)
+            return true;
+        return false;
+    }
+
+    private void ConsumeStageClearGraceMove()
+    {
+        if (!stageClearGraceActive || stageClearGraceMovesRemaining <= 0) return;
+
+        stageClearGraceMovesRemaining--;
+        Debug.Log($"[Board] Stage clear grace moves remaining: {stageClearGraceMovesRemaining}");
+
+        if (stageClearGraceMovesRemaining <= 0)
+        {
+            stageClearGraceActive = false;
+            stageClearPendingAfterResolution = true;
+            if (gameManager != null)
+                gameManager.SetState(GameManager.GameplayState.StageClearing);
+            Debug.Log("[Board] Final grace move consumed; stage clear will begin after the current resolution completes.");
+        }
     }
 
     public void BeginStageClearCleanup(System.Action onComplete)
@@ -225,6 +291,9 @@ public class Board : MonoBehaviour
         enableRandomSpecialOnGravity = stage.enableRandomSpecialOnGravity;
         spawnLocksOnRefill = stage.spawnLocksOnRefill;
         destroySymbolWhenUnlocked = stage.destroySymbolWhenUnlocked;
+        lockedTilesFallWithGravity = stage.lockedTilesFallWithGravity;
+        frozenTileSpawnMode = stage.frozenTileSpawnMode;
+        frozenTileBottomRowCount = stage.frozenTileBottomRowCount;
         randomSpecialTriggerChance = stage.randomSpecialChance;
         maxConsecutiveRandomTriggers = stage.maxConsecutiveRandomTriggers;
         lockSpawnChance = stage.lockSpawnChance;
@@ -317,6 +386,7 @@ public class Board : MonoBehaviour
     public void SelectSymbol(Symbol symbol)
     {
         if (IsGameBusy) return;
+        if (gameManager != null && !gameManager.AllowsPlayerInput) return;
 
         if (symbol.IsLocked && !allowSwappingLockedTiles)
         {
@@ -360,17 +430,32 @@ public class Board : MonoBehaviour
         }
 
         RegisterPlayerMove();
+        ConsumeStageClearGraceMove();
+        yield return TryRandomSpecialOnGraceMove();
 
         // This swap counts as an accepted player move - every Temporary lock on the board
         // melts one layer, regardless of whether it was actually matched.
         if (MeltAllTemporaryLocks())
         {
-            yield return CollapseAndRefill();
-            matchGroups = MatchFinder.FindMatchGroups(grid, width, height); // melting can reveal new matches
+            if (ShouldSkipRefillGeneration() || stageClearPendingAfterResolution)
+            {
+                matchGroups = MatchFinder.FindMatchGroups(grid, width, height); // melting can reveal new matches
+            }
+            else
+            {
+                yield return CollapseAndRefill();
+                matchGroups = MatchFinder.FindMatchGroups(grid, width, height); // melting can reveal new matches
+            }
         }
 
         if (matchGroups.Count > 0)
             yield return ResolveMatches(matchGroups);
+
+        if (stageClearPendingAfterResolution && !isStageClearing)
+        {
+            stageClearPendingAfterResolution = false;
+            FindObjectOfType<StageManager>()?.FinalizeStageClear();
+        }
 
         isBusy = false;
     }
@@ -510,6 +595,13 @@ public class Board : MonoBehaviour
             }
 
             if (isStageClearing) break;
+
+            if (ShouldSkipRefillGeneration())
+            {
+                Debug.Log("[Board] Stage clear grace active - skipping refill generation.");
+                currentGroups = new List<MatchGroup>();
+                break;
+            }
 
             yield return CollapseAndRefill();
             yield return TryRandomSpecialOnGravity(chainCount);
@@ -710,6 +802,51 @@ public class Board : MonoBehaviour
     /// maxConsecutiveRandomTriggers; pass forceOnce=true to guarantee exactly one trigger
     /// (used by the Inspector test button), bypassing the toggle and chance roll.
     /// </summary>
+    private IEnumerator TryRandomSpecialOnGraceMove()
+    {
+        if (!stageClearGraceActive || stageClearGraceMovesRemaining <= 0) yield break;
+        if (eligibleRandomSpecialTypes == null || eligibleRandomSpecialTypes.Length == 0) yield break;
+        if (stageClearGraceRandomSpecialChance <= 0f || Random.value >= stageClearGraceRandomSpecialChance) yield break;
+
+        var candidates = new List<Vector2Int>();
+        for (int x = 0; x < width; x++)
+            for (int y = 0; y < height; y++)
+            {
+                var occ = grid[x, y].Occupant;
+                if (occ != null && !occ.IsLocked) candidates.Add(new Vector2Int(x, y));
+            }
+
+        if (candidates.Count == 0) yield break;
+
+        var origin = candidates[Random.Range(0, candidates.Count)];
+        var originSymbol = grid[origin.x, origin.y].Occupant;
+        var effectType = eligibleRandomSpecialTypes[Random.Range(0, eligibleRandomSpecialTypes.Length)];
+        var affected = new HashSet<Vector2Int>(ComputeAffectedCells(effectType, origin, originSymbol.Type)) { origin };
+
+        Debug.Log($"[Board] Grace-period bonus: {effectType} at {origin} - clearing {affected.Count} cell(s)");
+
+        foreach (var pos in affected)
+        {
+            var occ = grid[pos.x, pos.y]?.Occupant;
+            if (occ != null) EventBus.Publish(new SymbolMatchedEvent(occ.Type, pos));
+        }
+
+        EventBus.Publish(new SpecialSymbolMatchedEvent(effectType, origin, affected.ToArray()));
+        EventBus.Publish(new ChainMatchedEvent(affected.Count, 1, affected.ToArray()));
+
+        int scoreDelta = 0;
+        foreach (var pos in affected)
+        {
+            var (_, delta) = ClearCell(pos, 1);
+            scoreDelta += delta;
+        }
+        currentScore += scoreDelta;
+        EventBus.Publish(new ScoreChangedEvent(currentScore, scoreDelta));
+
+        if (!ShouldSkipRefillGeneration())
+            yield return CollapseAndRefill();
+    }
+
     private IEnumerator TryRandomSpecialOnGravity(int chainCount, bool forceOnce = false)
     {
         if (eligibleRandomSpecialTypes == null || eligibleRandomSpecialTypes.Length == 0) yield break;
@@ -791,6 +928,17 @@ public class Board : MonoBehaviour
         isBusy = false;
     }
 
+    private bool ShouldSpawnFrozenTileOnRefill(int x, int y)
+    {
+        if (frozenTileSpawnMode == FrozenTileSpawnMode.None) return false;
+        if (Random.value >= lockSpawnChance) return false;
+
+        if (frozenTileBottomRowCount > 0 && y < height - frozenTileBottomRowCount)
+            return false;
+
+        return true;
+    }
+
     private LockSpawnOption PickWeightedLockOption()
     {
         if (lockSpawnOptions == null || lockSpawnOptions.Length == 0) return null;
@@ -826,7 +974,7 @@ public class Board : MonoBehaviour
 
                 var occ = grid[x, y].Occupant;
 
-                if (occ.IsLocked)
+                if (occ.IsLocked && !lockedTilesFallWithGravity)
                 {
                     // Locked/frozen tiles don't react to gravity - they stay exactly where
                     // they are and act as a floor for the segment above them. Nothing below
@@ -855,7 +1003,7 @@ public class Board : MonoBehaviour
                 var instance = Instantiate(prefab, GridToWorld(x, spawnHeight), Quaternion.identity, symbolParent);
                 instance.Initialize(type, SpecialType.None, new Vector2Int(x, y));
 
-                if (spawnLocksOnRefill && Random.value < lockSpawnChance)
+                if (ShouldSpawnFrozenTileOnRefill(x, y))
                 {
                     var option = PickWeightedLockOption();
                     if (option != null) instance.SetLock(option.layers, option.behavior, option.movesPerLayer);
