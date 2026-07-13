@@ -55,6 +55,8 @@ public class Board : MonoBehaviour
     [Tooltip("If true, any adjacent swap completes and stays, even if it doesn't create a match. " +
              "If false, swaps that don't create a match are reverted (classic match-3 behavior).")]
     [SerializeField] private bool allowNonMatchingSwaps = true;
+    [Tooltip("Starting health for the player each stage. Non-matching moves reduce health by 1.")]
+    [Min(1)] [SerializeField] private int maxHealth = 5;
     [Tooltip("If true, an L/T-shaped intersection (two runs crossing) creates one Bomb special " +
              "and the individual run lengths are ignored. If false, each run in the group creates " +
              "its own special independently (e.g. two crossing 4-runs each become a line-clear), " +
@@ -110,11 +112,19 @@ public class Board : MonoBehaviour
     private Symbol selected;
     private bool isBusy;
     private int currentScore;
+    private int moveCount;
+    private int currentHealth;
+
+    public int MoveCount => moveCount;
+    public int CurrentScore => currentScore;
+    public int CurrentHealth => currentHealth;
+    public int MaxHealth => maxHealth;
 
     private void Awake()
     {
         Instance = this;
         Debug.Log($"[Board] Awake - grid {width}x{height}");
+        currentHealth = maxHealth;
         grid = new Cell[width, height];
         for (int x = 0; x < width; x++)
             for (int y = 0; y < height; y++)
@@ -124,6 +134,14 @@ public class Board : MonoBehaviour
     private void Start()
     {
         Debug.Log("[Board] Start");
+
+        var stageManager = FindObjectOfType<StageManager>();
+        if (stageManager != null && stageManager.HasStagesConfigured())
+        {
+            Debug.Log("[Board] StageManager detected; deferring initial board population to stage setup.");
+            return;
+        }
+
         var saved = SaveSystem.Load();
         if (saved != null && saved.width == width && saved.height == height)
         {
@@ -174,6 +192,56 @@ public class Board : MonoBehaviour
         Debug.Log($"[Board] PopulateBoard finished - spawned {spawned}/{width * height} symbols");
 
         ApplyInitialLockPlacements();
+    }
+
+    public void ClearBoard()
+    {
+        ClearExistingSymbols();
+        currentScore = 0;
+        moveCount = 0;
+        selected = null;
+        isBusy = false;
+        currentHealth = maxHealth;
+        EventBus.Publish(new ScoreChangedEvent(currentScore, 0));
+        EventBus.Publish(new HealthChangedEvent(currentHealth, maxHealth));
+    }
+
+    public void ResetForStage(StageDefinition stage)
+    {
+        ClearBoard();
+        ApplyStageRules(stage);
+        currentHealth = maxHealth;
+        EventBus.Publish(new HealthChangedEvent(currentHealth, maxHealth));
+        PopulateBoard();
+        SaveSystem.DeleteSave();
+        StartCoroutine(ResolveAnyExistingMatches());
+    }
+
+    private void ApplyStageRules(StageDefinition stage)
+    {
+        if (stage == null) return;
+
+        allowNonMatchingSwaps = stage.allowNonMatchingSwaps;
+        enableRandomSpecialOnGravity = stage.enableRandomSpecialOnGravity;
+        spawnLocksOnRefill = stage.spawnLocksOnRefill;
+        destroySymbolWhenUnlocked = stage.destroySymbolWhenUnlocked;
+        randomSpecialTriggerChance = stage.randomSpecialChance;
+        maxConsecutiveRandomTriggers = stage.maxConsecutiveRandomTriggers;
+        lockSpawnChance = stage.lockSpawnChance;
+    }
+
+    private void ClearExistingSymbols()
+    {
+        for (int x = 0; x < width; x++)
+            for (int y = 0; y < height; y++)
+            {
+                var occ = grid[x, y].Occupant;
+                if (occ != null)
+                {
+                    Destroy(occ.gameObject);
+                    grid[x, y].Occupant = null;
+                }
+            }
     }
 
     private void ApplyInitialLockPlacements()
@@ -280,12 +348,18 @@ public class Board : MonoBehaviour
                    string.Join(" | ", matchGroups.Select(g =>
                        $"cells={g.Cells.Count} lines={g.Lines.Count} intersection={g.IsIntersection} longestRun={g.LongestRun}")));
 
-        if (matchGroups.Count == 0 && !allowNonMatchingSwaps)
+        if (matchGroups.Count == 0)
+            ApplyHealthPenalty();
+
+        bool swapIsValid = matchGroups.Count > 0 || allowNonMatchingSwaps;
+        if (!swapIsValid)
         {
             yield return SwapRoutine(a, b); // revert - no match, invalid move
             isBusy = false;
             yield break;
         }
+
+        RegisterPlayerMove();
 
         // This swap counts as an accepted player move - every Temporary lock on the board
         // melts one layer, regardless of whether it was actually matched.
@@ -299,6 +373,19 @@ public class Board : MonoBehaviour
             yield return ResolveMatches(matchGroups);
 
         isBusy = false;
+    }
+
+    private void RegisterPlayerMove()
+    {
+        moveCount++;
+        EventBus.Publish(new PlayerMoveEvent(moveCount));
+    }
+
+    private void ApplyHealthPenalty(int amount = 1)
+    {
+        if (currentHealth <= 0) return;
+        currentHealth = Mathf.Max(0, currentHealth - amount);
+        EventBus.Publish(new HealthChangedEvent(currentHealth, maxHealth));
     }
 
     private IEnumerator SwapRoutine(Symbol a, Symbol b)
@@ -373,35 +460,7 @@ public class Board : MonoBehaviour
             foreach (var group in currentGroups)
             {
                 foreach (var p in group.Cells) allPositions.Add(p);
-
-                if (group.IsIntersection && intersectionsCreateBombs)
-                {
-                    var seed = group.GetSeedCell();
-                    var seedType = grid[seed.x, seed.y].Occupant.Type;
-                    specialsToCreate[seed] = (SpecialType.Bomb, seedType);
-                }
-                else
-                {
-                    // Not treating this as a bomb (either a straight run, or intersections-as-bomb
-                    // is disabled) - let each constituent run create its own special independently.
-                    foreach (var line in group.Lines)
-                    {
-                        if (line.Count < 4) continue;
-
-                        var seed = line[line.Count / 2];
-                        var seedType = grid[seed.x, seed.y].Occupant.Type;
-
-                        if (line.Count >= 5)
-                        {
-                            specialsToCreate[seed] = (SpecialType.ColorClear, seedType);
-                        }
-                        else
-                        {
-                            bool horizontal = line[0].y == line[1].y;
-                            specialsToCreate[seed] = (horizontal ? SpecialType.RowClear : SpecialType.ColumnClear, seedType);
-                        }
-                    }
-                }
+                RegisterSpecialsFromMatchGroup(group, specialsToCreate);
             }
 
             // Any special symbols caught inside this match activate and pull in extra cells.
@@ -456,35 +515,91 @@ public class Board : MonoBehaviour
         SaveSystem.Save(BuildSaveData());
     }
 
+    private void RegisterSpecialsFromMatchGroup(MatchGroup group,
+        Dictionary<Vector2Int, (SpecialType special, SymbolType type)> specialsToCreate)
+    {
+        if (group.IsIntersection && intersectionsCreateBombs)
+        {
+            var seed = group.GetSeedCell();
+            RegisterSpecialSeed(seed, SpecialType.Bomb, specialsToCreate);
+            return;
+        }
+
+        // Not treating this as a bomb (either a straight run, or intersections-as-bomb
+        // is disabled) - let each constituent run create its own special independently.
+        foreach (var line in group.Lines)
+        {
+            if (line.Count < 4) continue;
+            RegisterSpecialFromLine(line, specialsToCreate);
+        }
+    }
+
+    private void RegisterSpecialFromLine(List<Vector2Int> line,
+        Dictionary<Vector2Int, (SpecialType special, SymbolType type)> specialsToCreate)
+    {
+        var seed = line[line.Count / 2];
+        var special = line.Count >= 5
+            ? SpecialType.ColorClear
+            : (line[0].y == line[1].y ? SpecialType.RowClear : SpecialType.ColumnClear);
+
+        RegisterSpecialSeed(seed, special, specialsToCreate);
+    }
+
+    private void RegisterSpecialSeed(Vector2Int seed, SpecialType special,
+        Dictionary<Vector2Int, (SpecialType special, SymbolType type)> specialsToCreate)
+    {
+        var seedType = grid[seed.x, seed.y].Occupant?.Type ?? SymbolType.Red;
+        specialsToCreate[seed] = (special, seedType);
+    }
+
     /// <summary>Every grid position a given special effect would hit, from a given origin cell.</summary>
     private List<Vector2Int> ComputeAffectedCells(SpecialType type, Vector2Int origin, SymbolType colorForColorClear)
     {
-        var affected = new List<Vector2Int>();
-
-        switch (type)
+        return type switch
         {
-            case SpecialType.RowClear:
-                for (int x = 0; x < width; x++) affected.Add(new Vector2Int(x, origin.y));
-                break;
-            case SpecialType.ColumnClear:
-                for (int y = 0; y < height; y++) affected.Add(new Vector2Int(origin.x, y));
-                break;
-            case SpecialType.Bomb:
-                for (int dx = -1; dx <= 1; dx++)
-                    for (int dy = -1; dy <= 1; dy++)
-                    {
-                        int nx = origin.x + dx, ny = origin.y + dy;
-                        if (nx >= 0 && nx < width && ny >= 0 && ny < height)
-                            affected.Add(new Vector2Int(nx, ny));
-                    }
-                break;
-            case SpecialType.ColorClear:
-                for (int x = 0; x < width; x++)
-                    for (int y = 0; y < height; y++)
-                        if (!grid[x, y].IsEmpty && grid[x, y].Occupant.Type == colorForColorClear)
-                            affected.Add(new Vector2Int(x, y));
-                break;
-        }
+            SpecialType.RowClear => ComputeRowClearAffectedCells(origin),
+            SpecialType.ColumnClear => ComputeColumnClearAffectedCells(origin),
+            SpecialType.Bomb => ComputeBombAffectedCells(origin),
+            SpecialType.ColorClear => ComputeColorClearAffectedCells(origin, colorForColorClear),
+            _ => new List<Vector2Int>()
+        };
+    }
+
+    private List<Vector2Int> ComputeRowClearAffectedCells(Vector2Int origin)
+    {
+        var affected = new List<Vector2Int>();
+        for (int x = 0; x < width; x++) affected.Add(new Vector2Int(x, origin.y));
+        return affected;
+    }
+
+    private List<Vector2Int> ComputeColumnClearAffectedCells(Vector2Int origin)
+    {
+        var affected = new List<Vector2Int>();
+        for (int y = 0; y < height; y++) affected.Add(new Vector2Int(origin.x, y));
+        return affected;
+    }
+
+    private List<Vector2Int> ComputeBombAffectedCells(Vector2Int origin)
+    {
+        var affected = new List<Vector2Int>();
+        for (int dx = -1; dx <= 1; dx++)
+            for (int dy = -1; dy <= 1; dy++)
+            {
+                int nx = origin.x + dx, ny = origin.y + dy;
+                if (nx >= 0 && nx < width && ny >= 0 && ny < height)
+                    affected.Add(new Vector2Int(nx, ny));
+            }
+
+        return affected;
+    }
+
+    private List<Vector2Int> ComputeColorClearAffectedCells(Vector2Int origin, SymbolType colorForColorClear)
+    {
+        var affected = new List<Vector2Int>();
+        for (int x = 0; x < width; x++)
+            for (int y = 0; y < height; y++)
+                if (!grid[x, y].IsEmpty && grid[x, y].Occupant.Type == colorForColorClear)
+                    affected.Add(new Vector2Int(x, y));
 
         return affected;
     }
@@ -519,11 +634,38 @@ public class Board : MonoBehaviour
     private Vector2Int[] ActivateSpecial(Symbol special)
     {
         var pos = special.GridPosition;
-        var affected = ComputeAffectedCells(special.Special, pos, special.Type);
+        var affected = special.Special switch
+        {
+            SpecialType.RowClear => ActivateRowClear(pos),
+            SpecialType.ColumnClear => ActivateColumnClear(pos),
+            SpecialType.Bomb => ActivateBomb(pos),
+            SpecialType.ColorClear => ActivateColorClear(pos, special.Type),
+            _ => new Vector2Int[0]
+        };
 
         // This is the "open event" for special matches - hook VFX/SFX/UI to it via SpecialSymbolEventRelay.
-        EventBus.Publish(new SpecialSymbolMatchedEvent(special.Special, pos, affected.ToArray()));
-        return affected.ToArray();
+        EventBus.Publish(new SpecialSymbolMatchedEvent(special.Special, pos, affected));
+        return affected;
+    }
+
+    private Vector2Int[] ActivateRowClear(Vector2Int origin)
+    {
+        return ComputeRowClearAffectedCells(origin).ToArray();
+    }
+
+    private Vector2Int[] ActivateColumnClear(Vector2Int origin)
+    {
+        return ComputeColumnClearAffectedCells(origin).ToArray();
+    }
+
+    private Vector2Int[] ActivateBomb(Vector2Int origin)
+    {
+        return ComputeBombAffectedCells(origin).ToArray();
+    }
+
+    private Vector2Int[] ActivateColorClear(Vector2Int origin, SymbolType colorForColorClear)
+    {
+        return ComputeColorClearAffectedCells(origin, colorForColorClear).ToArray();
     }
 
     /// <summary>

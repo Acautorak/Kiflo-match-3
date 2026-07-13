@@ -67,10 +67,50 @@ public readonly struct ScoreChangedEvent
     }
 }
 
+public readonly struct HealthChangedEvent
+{
+    public readonly int CurrentHealth;
+    public readonly int MaxHealth;
+
+    public HealthChangedEvent(int currentHealth, int maxHealth)
+    {
+        CurrentHealth = currentHealth;
+        MaxHealth = maxHealth;
+    }
+}
+
 public readonly struct GameOverEvent
 {
     public readonly int FinalScore;
     public GameOverEvent(int finalScore) => FinalScore = finalScore;
+}
+
+public readonly struct PlayerMoveEvent
+{
+    public readonly int MoveCount;
+    public PlayerMoveEvent(int moveCount) => MoveCount = moveCount;
+}
+
+public readonly struct StageCompletedEvent
+{
+    public readonly int StageIndex;
+    public readonly int Score;
+    public StageCompletedEvent(int stageIndex, int score)
+    {
+        StageIndex = stageIndex;
+        Score = score;
+    }
+}
+
+public readonly struct StageStartedEvent
+{
+    public readonly int StageIndex;
+    public readonly StageDefinition Stage;
+    public StageStartedEvent(int stageIndex, StageDefinition stage)
+    {
+        StageIndex = stageIndex;
+        Stage = stage;
+    }
 }
 
 /// <summary>
