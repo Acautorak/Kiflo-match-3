@@ -72,3 +72,24 @@ public readonly struct GameOverEvent
     public readonly int FinalScore;
     public GameOverEvent(int finalScore) => FinalScore = finalScore;
 }
+
+/// <summary>
+/// Fired every time a lock loses a layer - either from being caught in a match/special
+/// clear (TriggeredByMatch=true) or from the automatic per-move melt on Temporary locks
+/// (TriggeredByMatch=false). FullyUnlocked is true the instant the last layer is removed.
+/// </summary>
+public readonly struct LockLayerRemovedEvent
+{
+    public readonly Vector2Int Position;
+    public readonly int LayersRemaining;
+    public readonly bool TriggeredByMatch;
+    public readonly bool FullyUnlocked;
+
+    public LockLayerRemovedEvent(Vector2Int position, int layersRemaining, bool triggeredByMatch, bool fullyUnlocked)
+    {
+        Position = position;
+        LayersRemaining = layersRemaining;
+        TriggeredByMatch = triggeredByMatch;
+        FullyUnlocked = fullyUnlocked;
+    }
+}
