@@ -9,6 +9,8 @@ public class StageDefinition
 
     public StageGoalType goalType = StageGoalType.Score;
     public int goalValue = 1000;
+    [Tooltip("Only used when goalType = Collect: which symbol type the player needs to clear goalValue of.")]
+    public SymbolType goalSymbolType;
 
     public bool allowNonMatchingSwaps = true;
     public bool enableRandomSpecialOnGravity = false;
@@ -28,7 +30,9 @@ public enum StageGoalType
 {
     None,
     Score,
-    MoveCount
+    MoveCount,
+    /// <summary>Clear goalValue symbols of goalSymbolType (tracked via SymbolMatchedEvent).</summary>
+    Collect
 }
 
 public enum FrozenTileSpawnMode

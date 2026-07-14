@@ -14,7 +14,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::SymbolVisualConfig
   sprites:
   - type: 0
-    normal: {fileID: 21300000, guid: d4a503667e9d24d4d8c9dee184a7d8e5, type: 3}
+    normal: {fileID: 21300000, guid: 4d019f27f8cefce4f95f61578e5f9e15, type: 3}
     rowClear: {fileID: 21300000, guid: 3d76ca264178861459231c2d73f2354b, type: 3}
     columnClear: {fileID: 21300000, guid: 22b842513dbcf0d47940e905acc310ac, type: 3}
     bomb: {fileID: 21300000, guid: 420489b8523e4cb43a7bdb08362b0e4b, type: 3}
@@ -32,7 +32,7 @@ MonoBehaviour:
     bomb: {fileID: 21300000, guid: 420489b8523e4cb43a7bdb08362b0e4b, type: 3}
     colorClear: {fileID: 21300000, guid: 15b4c2144c9e02c4e8e891f1bd019252, type: 3}
   - type: 3
-    normal: {fileID: 21300000, guid: 4d019f27f8cefce4f95f61578e5f9e15, type: 3}
+    normal: {fileID: 21300000, guid: d4a503667e9d24d4d8c9dee184a7d8e5, type: 3}
     rowClear: {fileID: 21300000, guid: 3d76ca264178861459231c2d73f2354b, type: 3}
     columnClear: {fileID: 21300000, guid: 22b842513dbcf0d47940e905acc310ac, type: 3}
     bomb: {fileID: 21300000, guid: 420489b8523e4cb43a7bdb08362b0e4b, type: 3}

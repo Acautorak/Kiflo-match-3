@@ -11,6 +11,7 @@ public class UIManager : MonoBehaviour
     [SerializeField] private TextMeshProUGUI scoreText;
     [SerializeField] private TextMeshProUGUI movesText;
     [SerializeField] private TextMeshProUGUI stageText;
+    [SerializeField] private TextMeshProUGUI goalText;
     [SerializeField] private TextMeshProUGUI messageText;
     [SerializeField] private Slider healthSlider;
     [SerializeField] private Button nextStageButton;
@@ -56,16 +57,19 @@ public class UIManager : MonoBehaviour
         SetStageClearVisible(false);
         SetGameOverVisible(false);
         RefreshDisplay();
+        RefreshGoalDisplay();
     }
 
     private void HandleScoreChanged(ScoreChangedEvent evt)
     {
         RefreshDisplay();
+        RefreshGoalDisplay();
     }
 
     private void HandlePlayerMove(PlayerMoveEvent evt)
     {
         RefreshDisplay();
+        RefreshGoalDisplay();
     }
 
     private void HandleHealthChanged(HealthChangedEvent evt)
@@ -76,6 +80,7 @@ public class UIManager : MonoBehaviour
     private void HandleStageStarted(StageStartedEvent evt)
     {
         RefreshDisplay();
+        RefreshGoalDisplay();
         SetStageClearVisible(false);
         SetGameOverVisible(false);
         SetMessage($"Stage {evt.StageIndex + 1}: {evt.Stage.name}");
@@ -124,6 +129,22 @@ public class UIManager : MonoBehaviour
             healthSlider.maxValue = max;
             healthSlider.value = Mathf.Clamp(playerHealth.CurrentHealth, 0, max);
         }
+    }
+
+    private void RefreshGoalDisplay()
+    {
+        if (goalText == null || stageManager == null) return;
+
+        goalText.text = stageManager.CurrentGoalType switch
+        {
+            StageGoalType.Score =>
+                $"Score Goal: {(board != null ? board.CurrentScore : 0)}/{stageManager.CurrentGoalValue}",
+            StageGoalType.MoveCount =>
+                $"Moves Goal: {(board != null ? board.MoveCount : 0)}/{stageManager.CurrentGoalValue}",
+            StageGoalType.Collect =>
+                $"Collect {stageManager.CurrentGoalSymbolType}: {stageManager.CurrentCollectProgress}/{stageManager.CurrentGoalValue}",
+            _ => string.Empty
+        };
     }
 
     private void SetStageClearVisible(bool visible)

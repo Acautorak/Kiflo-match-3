@@ -112,6 +112,13 @@ public class Board : MonoBehaviour
         new LockSpawnOption { layers = 1, behavior = LockBehavior.Permanent, weight = 1f },
     };
 
+    [Header("System References (auto-found in Awake if left empty)")]
+    [Tooltip("Optional explicit link. If left empty, Board finds it in the scene at Awake. " +
+             "Assign this if you want Board to wait for StageManager to drive initialization " +
+             "(see Start()) instead of populating/loading itself.")]
+    [SerializeField] private StageManager stageManager;
+    [SerializeField] private PlayerHealth playerHealth;
+
     private Cell[,] grid;
     private Symbol selected;
     private bool isBusy;
@@ -129,11 +136,15 @@ public class Board : MonoBehaviour
     public int CurrentScore => currentScore;
     public bool IsGameBusy => isBusy || isStageClearing;
     public bool HasLoadedSavedState => hasLoadedSavedState;
+    public int Width => width;
+    public int Height => height;
 
     private void Awake()
     {
         Instance = this;
         gameManager = FindAnyObjectByType<GameManager>();
+        if (stageManager == null) stageManager = FindAnyObjectByType<StageManager>();
+        if (playerHealth == null) playerHealth = FindAnyObjectByType<PlayerHealth>();
         Debug.Log($"[Board] Awake - grid {width}x{height}");
         grid = new Cell[width, height];
         for (int x = 0; x < width; x++)
@@ -143,8 +154,30 @@ public class Board : MonoBehaviour
 
     private void Start()
     {
-        Debug.Log("[Board] Start");
+        // Unity doesn't guarantee Start() ordering between Board and StageManager. When a
+        // StageManager is present, it owns "what happens at game start" (fresh stage vs.
+        // restored stage) and is responsible for calling InitializeBoard() itself, at the
+        // right point in its own Start(). Only self-initialize here when Board is running
+        // standalone (no StageManager in the scene), to avoid both scripts populating/loading
+        // the board independently and racing each other.
+        if (stageManager != null)
+        {
+            Debug.Log("[Board] Start - StageManager present, waiting for it to drive initialization.");
+            return;
+        }
 
+        Debug.Log("[Board] Start - no StageManager found, initializing independently.");
+        InitializeBoard();
+    }
+
+    /// <summary>
+    /// Loads the saved board state if one matches the current grid size, otherwise populates
+    /// a fresh board, then resolves any pre-existing matches. Called automatically from Start()
+    /// when Board is running standalone; called explicitly by StageManager (when present) once
+    /// it has decided whether this is a fresh run or a restored one.
+    /// </summary>
+    public void InitializeBoard()
+    {
         var saved = SaveSystem.Load();
         if (saved != null && saved.width == width && saved.height == height)
         {
@@ -176,11 +209,27 @@ public class Board : MonoBehaviour
         isBusy = true;
         yield return ResolveMatches(groups);
         isBusy = false;
+        RestoreGameManagerRestingState();
+    }
+
+    /// <summary>
+    /// Puts GameManager back into whichever "not actively busy" state currently applies -
+    /// Idle (waiting for player input) normally, or GracePeriod if a stage-clear grace period
+    /// is in progress. Skipped while a stage-clear cleanup is underway/pending, since Board
+    /// or StageManager own that transition explicitly. Call this any time isBusy is cleared.
+    /// </summary>
+    private void RestoreGameManagerRestingState()
+    {
+        if (gameManager == null) return;
+        if (isStageClearing || stageClearPendingAfterResolution) return;
+        gameManager.SetState(stageClearGraceActive
+            ? GameManager.GameplayState.GracePeriod
+            : GameManager.GameplayState.Idle);
     }
 
     #region Setup
 
-    private void PopulateBoard()
+    private void PopulateBoard(InitialLockPlacement[] overrideLockPlacements = null)
     {
         int spawned = 0;
         for (int x = 0; x < width; x++)
@@ -196,7 +245,7 @@ public class Board : MonoBehaviour
         }
         Debug.Log($"[Board] PopulateBoard finished - spawned {spawned}/{width * height} symbols");
 
-        ApplyInitialLockPlacements();
+        ApplyInitialLockPlacements(overrideLockPlacements);
     }
 
     public void ClearBoard()
@@ -211,11 +260,11 @@ public class Board : MonoBehaviour
         EventBus.Publish(new ScoreChangedEvent(currentScore, 0));
     }
 
-    public void ResetForStage(StageDefinition stage)
+    public void ResetForStage(StageDefinition stage, InitialLockPlacement[] proceduralLockPlacements = null)
     {
         ClearBoard();
         ApplyStageRules(stage);
-        PopulateBoard();
+        PopulateBoard(proceduralLockPlacements);
         hasLoadedSavedState = false;
         SaveNow();
         StartCoroutine(ResolveAnyExistingMatches());
@@ -313,12 +362,16 @@ public class Board : MonoBehaviour
             }
     }
 
-    private void ApplyInitialLockPlacements()
+    private void ApplyInitialLockPlacements(InitialLockPlacement[] overridePlacements = null)
     {
-        if (initialLockPlacements == null || initialLockPlacements.Length == 0) return;
+        var placements = (overridePlacements != null && overridePlacements.Length > 0)
+            ? overridePlacements
+            : initialLockPlacements;
+
+        if (placements == null || placements.Length == 0) return;
 
         int applied = 0;
-        foreach (var placement in initialLockPlacements)
+        foreach (var placement in placements)
         {
             var p = placement.position;
             if (p.x < 0 || p.x >= width || p.y < 0 || p.y >= height)
@@ -337,7 +390,7 @@ public class Board : MonoBehaviour
             occ.SetLock(placement.layers, placement.behavior, placement.movesPerLayer);
             applied++;
         }
-        Debug.Log($"[Board] Applied {applied}/{initialLockPlacements.Length} initial lock placement(s).");
+        Debug.Log($"[Board] Applied {applied}/{placements.Length} initial lock placement(s).");
     }
 
     private bool CreatesImmediateMatch(int x, int y, SymbolType type)
@@ -411,6 +464,7 @@ public class Board : MonoBehaviour
     private IEnumerator TrySwap(Symbol a, Symbol b)
     {
         isBusy = true;
+        gameManager?.SetState(GameManager.GameplayState.Playing);
         yield return SwapRoutine(a, b);
 
         var matchGroups = MatchFinder.FindMatchGroups(grid, width, height);
@@ -426,6 +480,7 @@ public class Board : MonoBehaviour
         {
             yield return SwapRoutine(a, b); // revert - no match, invalid move
             isBusy = false;
+            RestoreGameManagerRestingState();
             yield break;
         }
 
@@ -454,10 +509,11 @@ public class Board : MonoBehaviour
         if (stageClearPendingAfterResolution && !isStageClearing)
         {
             stageClearPendingAfterResolution = false;
-            FindObjectOfType<StageManager>()?.FinalizeStageClear();
+            stageManager?.FinalizeStageClear();
         }
 
         isBusy = false;
+        RestoreGameManagerRestingState();
     }
 
     private void RegisterPlayerMove()
@@ -468,9 +524,8 @@ public class Board : MonoBehaviour
 
     private void ApplyHealthPenalty(int amount = 1)
     {
-        var health = FindObjectOfType<PlayerHealth>();
-        if (health != null)
-            health.TakeDamage(amount);
+        if (playerHealth != null)
+            playerHealth.TakeDamage(amount);
     }
 
     private IEnumerator SwapRoutine(Symbol a, Symbol b)
@@ -531,6 +586,7 @@ public class Board : MonoBehaviour
     {
         var currentGroups = initialGroups;
         int chainCount = 0;
+        gameManager?.SetState(GameManager.GameplayState.ResolvingMatches);
 
         while (currentGroups.Count > 0)
         {
@@ -552,13 +608,22 @@ public class Board : MonoBehaviour
 
             // Any special symbols caught inside this match activate and pull in extra cells.
             var extraCleared = new HashSet<Vector2Int>();
+            bool anySpecialActivated = false;
             foreach (var pos in allPositions)
             {
                 var occ = grid[pos.x, pos.y].Occupant;
                 if (occ != null && occ.Special != SpecialType.None)
+                {
+                    if (!anySpecialActivated)
+                    {
+                        anySpecialActivated = true;
+                        gameManager?.SetState(GameManager.GameplayState.ResolvingSpecialMadness);
+                    }
                     foreach (var a in ActivateSpecial(occ)) extraCleared.Add(a);
+                }
             }
             foreach (var p in extraCleared) allPositions.Add(p);
+            if (anySpecialActivated) gameManager?.SetState(GameManager.GameplayState.ResolvingMatches);
 
             // --- Publish events for this cascade step ---
             foreach (var pos in allPositions)
@@ -605,6 +670,7 @@ public class Board : MonoBehaviour
 
             yield return CollapseAndRefill();
             yield return TryRandomSpecialOnGravity(chainCount);
+            gameManager?.SetState(GameManager.GameplayState.ResolvingMatches);
             currentGroups = MatchFinder.FindMatchGroups(grid, width, height);
         }
 
@@ -818,6 +884,8 @@ public class Board : MonoBehaviour
 
         if (candidates.Count == 0) yield break;
 
+        gameManager?.SetState(GameManager.GameplayState.ResolvingSpecialMadness);
+
         var origin = candidates[Random.Range(0, candidates.Count)];
         var originSymbol = grid[origin.x, origin.y].Occupant;
         var effectType = eligibleRandomSpecialTypes[Random.Range(0, eligibleRandomSpecialTypes.Length)];
@@ -866,6 +934,8 @@ public class Board : MonoBehaviour
                 }
 
             if (candidates.Count == 0) break;
+
+            gameManager?.SetState(GameManager.GameplayState.ResolvingSpecialMadness);
 
             var origin = candidates[Random.Range(0, candidates.Count)];
             var originSymbol = grid[origin.x, origin.y].Occupant;
@@ -926,6 +996,7 @@ public class Board : MonoBehaviour
         if (groups.Count > 0) yield return ResolveMatches(groups);
 
         isBusy = false;
+        RestoreGameManagerRestingState();
     }
 
     private bool ShouldSpawnFrozenTileOnRefill(int x, int y)
@@ -1093,18 +1164,17 @@ public class Board : MonoBehaviour
 
     private BoardSaveData BuildSaveData()
     {
-        var stageManager = FindObjectOfType<StageManager>();
-        var health = FindObjectOfType<PlayerHealth>();
-
         var data = new BoardSaveData
         {
             width = width,
             height = height,
             score = currentScore,
             moveCount = moveCount,
-            currentHealth = health != null ? health.CurrentHealth : 0,
-            maxHealth = health != null ? health.MaxHealth : 0,
+            currentHealth = playerHealth != null ? playerHealth.CurrentHealth : 0,
+            maxHealth = playerHealth != null ? playerHealth.MaxHealth : 0,
             currentStageIndex = stageManager != null ? stageManager.CurrentStageIndex : -1,
+            runSeed = stageManager != null ? stageManager.RunSeed : 0,
+            collectGoalProgress = stageManager != null ? stageManager.CurrentCollectProgress : 0,
             cells = new CellSaveData[width * height]
         };
 
@@ -1138,12 +1208,11 @@ public class Board : MonoBehaviour
         isBusy = false;
         isStageClearing = false;
 
-        var health = FindObjectOfType<PlayerHealth>();
-        if (health != null)
+        if (playerHealth != null)
         {
-            health.ResetForNewRun();
+            playerHealth.ResetForNewRun();
             if (data.maxHealth > 0)
-                health.SetHealth(data.currentHealth, data.maxHealth);
+                playerHealth.SetHealth(data.currentHealth, data.maxHealth);
         }
 
         for (int x = 0; x < width; x++)
@@ -1157,9 +1226,8 @@ public class Board : MonoBehaviour
                     symbol.RestoreLockState(cellData.lockLayers, cellData.lockBehavior, cellData.movesPerLayer, cellData.movesUntilNextAutoUnlock);
             }
 
-        var stageManager = FindObjectOfType<StageManager>();
         if (stageManager != null && data.currentStageIndex >= 0)
-            stageManager.LoadStageState(data.currentStageIndex);
+            stageManager.LoadStageState(data.currentStageIndex, data.runSeed, data.collectGoalProgress);
 
         EventBus.Publish(new ScoreChangedEvent(currentScore, 0));
         EventBus.Publish(new PlayerMoveEvent(moveCount));

@@ -1,0 +1,102 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 2b8d3068021cb8946960a4c06c35dde8, type: 3}
+  m_Name: StageGenerationConfig
+  m_EditorClassIdentifier: Assembly-CSharp::StageGenerationConfig
+  difficultyCurve:
+    serializedVersion: 2
+    m_Curve:
+    - serializedVersion: 3
+      time: 0
+      value: 0
+      inSlope: 0
+      outSlope: 0
+      tangentMode: 0
+      weightedMode: 0
+      inWeight: 0
+      outWeight: 0
+    - serializedVersion: 3
+      time: 20
+      value: 1
+      inSlope: 0
+      outSlope: 0
+      tangentMode: 0
+      weightedMode: 0
+      inWeight: 0
+      outWeight: 0
+    m_PreInfinity: 2
+    m_PostInfinity: 2
+    m_RotationOrder: 4
+  goalTypeWeights:
+  - type: 1
+    weight: 3
+  - type: 2
+    weight: 1
+  - type: 3
+    weight: 5
+  scoreGoal:
+    min: 800
+    max: 600000
+  moveCountGoal:
+    min: 10
+    max: 28
+  collectGoal:
+    min: 15
+    max: 350
+  gracePeriodMoves:
+    min: 2
+    max: 5
+  gracePeriodRandomSpecialChance:
+    min: 0
+    max: 0.6
+  randomSpecialOnGravityUnlockDepth: 3
+  randomSpecialChance:
+    min: 0.02
+    max: 0.15
+  maxConsecutiveRandomTriggers:
+    min: 5
+    max: 8
+  destroySymbolWhenUnlocked: 1
+  lockedTilesFallWithGravity: 1
+  initialLocksUnlockDepth: 2
+  initialLockCount:
+    min: 0
+    max: 6
+  locksOnRefillUnlockDepth: 4
+  lockSpawnChance:
+    min: 0.02
+    max: 0.05
+  lockSpawnOptions:
+  - layers: 1
+    behavior: 2
+    movesPerLayer: 3
+    weight: 3
+  - layers: 2
+    behavior: 2
+    movesPerLayer: 3
+    weight: 2
+  - layers: 1
+    behavior: 1
+    movesPerLayer: 3
+    weight: 1
+  frozenTilesUnlockDepth: 6
+  frozenTileModeWeights:
+  - mode: 1
+    weight: 2
+  - mode: 2
+    weight: 1
+  - mode: 3
+    weight: 1
+  frozenTileBottomRowCount:
+    min: 1
+    max: 3
+  allowNonMatchingSwaps: 1

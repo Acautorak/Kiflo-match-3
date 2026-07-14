@@ -6,10 +6,24 @@ using UnityEngine;
 /// </summary>
 public class GameManager : MonoBehaviour
 {
+    /// <summary>
+    /// Idle: waiting for player input (nothing busy on the board).
+    /// Playing: an accepted swap is currently animating.
+    /// ResolvingMatches: matches/cascades are being cleared, scored, and refilled.
+    /// ResolvingSpecialMadness: a special-symbol activation or random "gravity bonus" effect
+    /// is animating/calculating as part of the current cascade step.
+    /// MadnessBonusGameplay: reserved for a future dedicated bonus round - not implemented
+    /// yet, nothing in the project currently transitions into or out of this state.
+    /// GracePeriod: stage-clear goal was reached; player gets a few extra moves.
+    /// StageClearing: stage-clear cleanup animation, or game-over lockout.
+    /// </summary>
     public enum GameplayState
     {
         Idle,
         Playing,
+        ResolvingMatches,
+        ResolvingSpecialMadness,
+        MadnessBonusGameplay,
         GracePeriod,
         StageClearing
     }
@@ -17,11 +31,13 @@ public class GameManager : MonoBehaviour
     [SerializeField] private Board board;
     [SerializeField] private StageManager stageManager;
 
-    private GameplayState currentState = GameplayState.Playing;
+    private GameplayState currentState = GameplayState.Idle;
 
     public GameplayState CurrentState => currentState;
-    public bool AllowsBoardRefill => currentState == GameplayState.Playing;
-    public bool AllowsPlayerInput => currentState == GameplayState.Playing || currentState == GameplayState.GracePeriod;
+    public bool AllowsBoardRefill => currentState == GameplayState.Playing
+        || currentState == GameplayState.ResolvingMatches
+        || currentState == GameplayState.ResolvingSpecialMadness;
+    public bool AllowsPlayerInput => currentState == GameplayState.Idle || currentState == GameplayState.GracePeriod;
 
     private void OnEnable()
     {
@@ -48,6 +64,17 @@ public class GameManager : MonoBehaviour
         Debug.Log($"[GameManager] State -> {currentState}");
     }
 
+    /// <summary>
+    /// Reserved for a future dedicated bonus round. Nothing calls this yet, and no gameplay
+    /// is implemented for MadnessBonusGameplay - it only flips the state so UI/other systems
+    /// can start reacting to it (e.g. showing a placeholder banner) ahead of the real feature.
+    /// </summary>
+    public void EnterMadnessBonusGameplay()
+    {
+        Debug.Log("[GameManager] MadnessBonusGameplay requested - not implemented yet, no-op beyond the state change.");
+        SetState(GameplayState.MadnessBonusGameplay);
+    }
+
     private void HandleScoreChanged(ScoreChangedEvent evt)
     {
         Debug.Log($"Score: {evt.NewScore} (+{evt.Delta})");
@@ -61,7 +88,7 @@ public class GameManager : MonoBehaviour
 
     private void HandleStageStarted(StageStartedEvent evt)
     {
-        SetState(GameplayState.Playing);
+        SetState(GameplayState.Idle);
     }
 
     private void HandleStageCompleted(StageCompletedEvent evt)

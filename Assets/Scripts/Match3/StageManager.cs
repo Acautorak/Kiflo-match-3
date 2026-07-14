@@ -1,4 +1,5 @@
 using System.Collections;
+using System.Collections.Generic;
 using UnityEngine;
 
 public class StageManager : MonoBehaviour
@@ -7,24 +8,58 @@ public class StageManager : MonoBehaviour
     [SerializeField] private Board board;
     [SerializeField] private PlayerHealth playerHealth;
     [SerializeField] private GameManager gameManager;
-    [SerializeField] private StageDefinition[] stages;
     [SerializeField] private bool autoStartFirstStage = true;
+
+    [Header("Procedural Generation")]
+    [Tooltip("Designer-tunable asset that drives generation - see StageGenerationConfig for every " +
+             "knob (difficulty curve, goal ranges, lock/freeze unlock depths, weighted pools, etc). " +
+             "Required; stages cannot be generated without one.")]
+    [SerializeField] private StageGenerationConfig generationConfig;
+    [Tooltip("Seed for this run's procedural generation. Leave at 0 to have StartNewRun() pick a " +
+             "random seed automatically. The active seed is saved with the game so a restored run " +
+             "regenerates byte-identical stages.")]
+    [SerializeField] private int runSeed = 0;
+
+    private readonly List<StageDefinition> generatedStages = new List<StageDefinition>();
+    private readonly List<InitialLockPlacement[]> generatedLockPlacements = new List<InitialLockPlacement[]>();
 
     private int currentStageIndex = -1;
     private StageDefinition currentStage;
-
-    public int CurrentStageIndex => currentStageIndex;
     private bool isTransitioning;
     private bool isStageCleared;
     private bool isStageClearPending;
     private int remainingGraceMoves;
+    private int collectGoalProgress;
 
-   
+    public int CurrentStageIndex => currentStageIndex;
+    public int RunSeed => runSeed;
+
+    /// <summary>The full generated definition for the stage currently in play - read-only from the outside.</summary>
+    public StageDefinition CurrentStage => currentStage;
+    public string CurrentStageName => currentStage != null ? currentStage.name : null;
+    public string CurrentStageDescription => currentStage != null ? currentStage.description : null;
+    public StageGoalType CurrentGoalType => currentStage != null ? currentStage.goalType : StageGoalType.None;
+    public int CurrentGoalValue => currentStage != null ? currentStage.goalValue : 0;
+    public SymbolType CurrentGoalSymbolType => currentStage != null ? currentStage.goalSymbolType : default;
+    public int CurrentCollectProgress => collectGoalProgress;
+    public int CurrentGracePeriodMoves => currentStage != null ? currentStage.gracePeriodMoves : 0;
+    public float CurrentGracePeriodRandomSpecialChance => currentStage != null ? currentStage.gracePeriodRandomSpecialChance : 0f;
+    public bool CurrentAllowsNonMatchingSwaps => currentStage != null && currentStage.allowNonMatchingSwaps;
+    public bool CurrentEnablesRandomSpecialOnGravity => currentStage != null && currentStage.enableRandomSpecialOnGravity;
+    public float CurrentRandomSpecialChance => currentStage != null ? currentStage.randomSpecialChance : 0f;
+    public bool CurrentSpawnsLocksOnRefill => currentStage != null && currentStage.spawnLocksOnRefill;
+    public float CurrentLockSpawnChance => currentStage != null ? currentStage.lockSpawnChance : 0f;
+    public FrozenTileSpawnMode CurrentFrozenTileSpawnMode => currentStage != null ? currentStage.frozenTileSpawnMode : FrozenTileSpawnMode.None;
+    public int CurrentFrozenTileBottomRowCount => currentStage != null ? currentStage.frozenTileBottomRowCount : 0;
+    public bool IsStageCleared => isStageCleared;
+    public bool IsStageClearPending => isStageClearPending;
+    public int RemainingGraceMoves => remainingGraceMoves;
 
     private void OnEnable()
     {
         EventBus.Subscribe<ScoreChangedEvent>(HandleScoreChanged);
         EventBus.Subscribe<PlayerMoveEvent>(HandlePlayerMove);
+        EventBus.Subscribe<SymbolMatchedEvent>(HandleSymbolMatched);
         EventBus.Subscribe<GameOverEvent>(HandleGameOver);
     }
 
@@ -32,6 +67,7 @@ public class StageManager : MonoBehaviour
     {
         EventBus.Unsubscribe<ScoreChangedEvent>(HandleScoreChanged);
         EventBus.Unsubscribe<PlayerMoveEvent>(HandlePlayerMove);
+        EventBus.Unsubscribe<SymbolMatchedEvent>(HandleSymbolMatched);
         EventBus.Unsubscribe<GameOverEvent>(HandleGameOver);
     }
 
@@ -40,81 +76,126 @@ public class StageManager : MonoBehaviour
         if (!autoStartFirstStage) return;
 
         var saved = SaveSystem.Load();
-        if (saved != null && saved.currentStageIndex >= 0 && saved.currentStageIndex < stages.Length)
+        if (saved != null && saved.currentStageIndex >= 0)
         {
+            runSeed = saved.runSeed;
+
             currentStageIndex = saved.currentStageIndex;
-            currentStage = stages[currentStageIndex];
+            currentStage = GetStage(currentStageIndex);
             isTransitioning = false;
             isStageCleared = false;
+            collectGoalProgress = saved.collectGoalProgress;
             EventBus.Publish(new StageStartedEvent(currentStageIndex, currentStage));
-            Debug.Log($"[StageManager] Restored saved stage {currentStageIndex + 1}: {currentStage.name}");
+            Debug.Log($"[StageManager] Restored saved stage {currentStageIndex + 1}: {currentStage?.name}");
+
+            // Board.Start() defers to us when a StageManager is present (see Board.cs) - this
+            // is the point where we tell it to actually load its saved grid state.
+            if (board != null) board.InitializeBoard();
             return;
         }
 
+        if (runSeed == 0)
+            runSeed = GenerateRandomSeed();
+
+        // No valid save - StartStage(0) below calls board.ResetForStage(), which populates
+        // a fresh board itself, so Board never needs InitializeBoard() in this path.
         StartStage(0);
     }
 
-    public bool HasStagesConfigured() => stages != null && stages.Length > 0;
+    public bool HasStagesConfigured() => generationConfig != null;
 
-    public void LoadStageState(int index)
+    /// <summary>Returns the StageDefinition for a given depth, generating (and caching) it first if needed.</summary>
+    private StageDefinition GetStage(int index)
     {
-        if (index < 0 || index >= stages.Length)
-            return;
+        EnsureGenerated(index);
+        return (index >= 0 && index < generatedStages.Count) ? generatedStages[index] : null;
+    }
 
+    private InitialLockPlacement[] GetLockPlacements(int index)
+    {
+        EnsureGenerated(index);
+        return (index >= 0 && index < generatedLockPlacements.Count) ? generatedLockPlacements[index] : null;
+    }
+
+    /// <summary>
+    /// Generates every stage up to and including `index` that isn't cached yet. Stages are
+    /// generated once and cached (not regenerated each visit) so re-entering an earlier stage
+    /// index within the same session doesn't reshuffle it.
+    /// </summary>
+    private void EnsureGenerated(int index)
+    {
+        if (generationConfig == null || index < 0) return;
+
+        int boardWidth = board != null ? board.Width : 8;
+        int boardHeight = board != null ? board.Height : 8;
+
+        while (generatedStages.Count <= index)
+        {
+            int depth = generatedStages.Count;
+            generatedStages.Add(ProceduralStageGenerator.GenerateStage(depth, runSeed, generationConfig));
+            generatedLockPlacements.Add(ProceduralStageGenerator.GenerateInitialLockPlacements(
+                depth, runSeed, generationConfig, boardWidth, boardHeight));
+        }
+    }
+
+    private int GenerateRandomSeed()
+    {
+        int seed = System.Guid.NewGuid().GetHashCode();
+        return seed == 0 ? 1 : seed;
+    }
+
+    public void LoadStageState(int index, int savedRunSeed = 0, int savedCollectGoalProgress = 0)
+    {
+        runSeed = savedRunSeed;
         currentStageIndex = index;
-        currentStage = stages[index];
+        currentStage = GetStage(index);
         isTransitioning = false;
         isStageCleared = false;
+        collectGoalProgress = savedCollectGoalProgress;
     }
 
     public void StartStage(int index)
     {
         if (!HasStagesConfigured())
         {
-            Debug.LogWarning("[StageManager] No stages configured.");
+            Debug.LogWarning("[StageManager] No Stage Generation Config assigned.");
             return;
         }
 
-        if (index < 0 || index >= stages.Length)
+        if (index < 0)
         {
-            Debug.LogWarning($"[StageManager] Stage index {index} is out of range.");
+            Debug.LogWarning($"[StageManager] Stage index {index} is invalid.");
             return;
         }
 
         currentStageIndex = index;
-        currentStage = stages[index];
+        currentStage = GetStage(index);
         isTransitioning = false;
         isStageCleared = false;
         isStageClearPending = false;
         remainingGraceMoves = 0;
+        collectGoalProgress = 0;
 
         if (gameManager != null)
-            gameManager.SetState(GameManager.GameplayState.Playing);
+            gameManager.SetState(GameManager.GameplayState.Idle);
 
         if (board != null)
-            board.ResetForStage(currentStage);
+            board.ResetForStage(currentStage, GetLockPlacements(index));
 
         EventBus.Publish(new StageStartedEvent(currentStageIndex, currentStage));
-        Debug.Log($"[StageManager] Started stage {currentStageIndex + 1}: {currentStage.name}");
+        Debug.Log($"[StageManager] Started stage {currentStageIndex + 1}: {currentStage?.name}");
     }
 
     public void AdvanceToNextStage()
     {
-        if (stages == null || stages.Length == 0) return;
+        if (!HasStagesConfigured()) return;
         if (currentStageIndex < 0) return;
         if (!isStageCleared) return;
-
-        var nextIndex = currentStageIndex + 1;
-        if (nextIndex >= stages.Length)
-        {
-            Debug.Log("[StageManager] All stages completed.");
-            return;
-        }
 
         if (board != null)
             board.ClearBoard();
 
-        StartStage(nextIndex);
+        StartStage(currentStageIndex + 1);
     }
 
     public void StartNewRun()
@@ -124,6 +205,10 @@ public class StageManager : MonoBehaviour
             playerHealth.ResetForNewRun();
             EventBus.Publish(new HealthChangedEvent(playerHealth.CurrentHealth, playerHealth.MaxHealth));
         }
+
+        runSeed = GenerateRandomSeed();
+        generatedStages.Clear();
+        generatedLockPlacements.Clear();
 
         if (board != null)
             board.ClearBoard();
@@ -171,6 +256,16 @@ public class StageManager : MonoBehaviour
             CompleteStage();
     }
 
+    private void HandleSymbolMatched(SymbolMatchedEvent evt)
+    {
+        if (currentStage == null || currentStage.goalType != StageGoalType.Collect) return;
+        if (evt.Type != currentStage.goalSymbolType) return;
+
+        collectGoalProgress++;
+        if (collectGoalProgress >= currentStage.goalValue)
+            CompleteStage();
+    }
+
     private void CompleteStage()
     {
         if (currentStage == null || isTransitioning || isStageClearPending) return;
@@ -180,7 +275,7 @@ public class StageManager : MonoBehaviour
         isTransitioning = true;
         isStageClearPending = true;
         isStageCleared = false;
-        remainingGraceMoves = currentStage != null ? currentStage.gracePeriodMoves : 3;
+        remainingGraceMoves = currentStage.gracePeriodMoves;
 
         if (gameManager != null)
             gameManager.SetState(GameManager.GameplayState.GracePeriod);
@@ -191,7 +286,7 @@ public class StageManager : MonoBehaviour
         if (board != null)
         {
             Debug.Log($"[StageManager] Stage {currentStageIndex + 1} goal reached. Player has {remainingGraceMoves} extra moves before clear.");
-            board.BeginStageClearGracePeriod(remainingGraceMoves, currentStage != null ? currentStage.gracePeriodRandomSpecialChance : 0f);
+            board.BeginStageClearGracePeriod(remainingGraceMoves, currentStage.gracePeriodRandomSpecialChance);
         }
         else
         {
