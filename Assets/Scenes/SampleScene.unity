@@ -1370,6 +1370,7 @@ MonoBehaviour:
   lockedTilesFallWithGravity: 0
   frozenTileSpawnMode: 0
   frozenTileBottomRowCount: 0
+  frozenTileOutsideBottomRowsChanceMultiplier: 0.25
   scorePerLockHit: 5
   allowSwappingLockedTiles: 0
   initialLockPlacements: []

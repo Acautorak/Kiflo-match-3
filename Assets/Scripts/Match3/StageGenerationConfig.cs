@@ -15,9 +15,11 @@ public class StageGenerationConfig : ScriptableObject
     [Tooltip("X = stage depth (0-based, 0 is the first stage). Y = difficulty, clamped to 0-1 before " +
              "use. Every range below is Lerp'd min->max using this value, so shape this curve to control " +
              "overall pacing (fast early ramp, plateau, late spike, etc.) without touching any other field. " +
+             "The default ramps gently to full difficulty by depth 50 rather than depth 20, so a run has " +
+             "a long, gradual climb instead of maxing out difficulty within the first couple dozen stages. " +
              "It's fine for the curve to run past 1.0 on the X axis - depths beyond the last keyframe just " +
              "reuse the final value, giving you a natural difficulty cap for an endless run.")]
-    public AnimationCurve difficultyCurve = AnimationCurve.EaseInOut(0f, 0f, 20f, 1f);
+    public AnimationCurve difficultyCurve = AnimationCurve.EaseInOut(0f, 0f, 50f, 1f);
 
     [Header("Goal")]
     [Tooltip("Which goal type a generated stage uses. Weight each entry to control the mix " +
@@ -30,8 +32,12 @@ public class StageGenerationConfig : ScriptableObject
     };
     public IntRange scoreGoal = new IntRange { min = 800, max = 6000 };
     public IntRange moveCountGoal = new IntRange { min = 10, max = 28 };
-    [Tooltip("How many of the chosen symbol type the player must clear for a Collect goal.")]
+    [Tooltip("How many of the chosen symbol type the player must clear, per target, for a Collect goal.")]
     public IntRange collectGoal = new IntRange { min = 15, max = 60 };
+    [Tooltip("How many distinct symbol types a Collect goal requires satisfying simultaneously " +
+             "(e.g. 2 = \"collect 20 Red AND 15 Blue\"). Keep min at 1 so early stages stay simple; " +
+             "raise max to make later stages juggle more colors at once.")]
+    public IntRange collectTargetCount = new IntRange { min = 1, max = 3 };
 
     [Header("Grace Period")]
     public IntRange gracePeriodMoves = new IntRange { min = 2, max = 5 };
@@ -39,7 +45,7 @@ public class StageGenerationConfig : ScriptableObject
 
     [Header("Random Special On Gravity")]
     [Tooltip("Stage depth at which the random gravity-bonus effect can first turn on for a stage.")]
-    [Min(0)] public int randomSpecialOnGravityUnlockDepth = 3;
+    [Min(0)] public int randomSpecialOnGravityUnlockDepth = 6;
     public FloatRange randomSpecialChance = new FloatRange { min = 0.02f, max = 0.15f };
     public IntRange maxConsecutiveRandomTriggers = new IntRange { min = 1, max = 3 };
 
@@ -51,13 +57,13 @@ public class StageGenerationConfig : ScriptableObject
 
     [Header("Locks / Freezing - Initial Placements")]
     [Tooltip("Stage depth at which designer-placed-style locked tiles start appearing on a fresh stage.")]
-    [Min(0)] public int initialLocksUnlockDepth = 2;
+    [Min(0)] public int initialLocksUnlockDepth = 5;
     [Tooltip("How many locked tiles to place on the stage, once unlocked by the depth above.")]
     public IntRange initialLockCount = new IntRange { min = 0, max = 6 };
 
     [Header("Locks / Freezing - Auto Spawn On Refill")]
     [Tooltip("Stage depth at which newly refilled tiles can start spawning already locked.")]
-    [Min(0)] public int locksOnRefillUnlockDepth = 4;
+    [Min(0)] public int locksOnRefillUnlockDepth = 10;
     public FloatRange lockSpawnChance = new FloatRange { min = 0.02f, max = 0.12f };
 
     [Header("Locks / Freezing - Shared Option Pool")]
@@ -73,7 +79,7 @@ public class StageGenerationConfig : ScriptableObject
 
     [Header("Frozen Tiles")]
     [Tooltip("Stage depth at which frozen-tile spawning can first turn on for a stage.")]
-    [Min(0)] public int frozenTilesUnlockDepth = 6;
+    [Min(0)] public int frozenTilesUnlockDepth = 15;
     public List<FrozenModeWeight> frozenTileModeWeights = new List<FrozenModeWeight>
     {
         new FrozenModeWeight { mode = FrozenTileSpawnMode.GenerateNewFrozenTiles, weight = 2f },

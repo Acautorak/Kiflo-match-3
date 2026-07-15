@@ -90,6 +90,11 @@ public class Board : MonoBehaviour
     [SerializeField] private FrozenTileSpawnMode frozenTileSpawnMode = FrozenTileSpawnMode.None;
     [Tooltip("If greater than 0, any newly spawned frozen tiles are only allowed in the bottom N rows of the board.")]
     [SerializeField] private int frozenTileBottomRowCount = 0;
+    [Tooltip("Multiplier applied to Lock Spawn Chance for rows outside the bottom-row priority band " +
+             "(y >= Frozen Tile Bottom Row Count). 0 = never spawn/freeze outside the band, 1 = no " +
+             "priority (uniform chance everywhere). Only relevant when Frozen Tile Bottom Row Count > 0.")]
+    [Range(0f, 1f)]
+    [SerializeField] private float frozenTileOutsideBottomRowsChanceMultiplier = 0.25f;
     [Tooltip("Score bonus awarded each time a lock takes a hit from a match/special effect, whether " +
              "or not it fully breaks this hit. Auto-melt hits (from moves) don't award this.")]
     [SerializeField] private int scorePerLockHit = 5;
@@ -1001,13 +1006,58 @@ public class Board : MonoBehaviour
 
     private bool ShouldSpawnFrozenTileOnRefill(int x, int y)
     {
-        if (frozenTileSpawnMode == FrozenTileSpawnMode.None) return false;
-        if (Random.value >= lockSpawnChance) return false;
-
-        if (frozenTileBottomRowCount > 0 && y < height - frozenTileBottomRowCount)
+        if (frozenTileSpawnMode != FrozenTileSpawnMode.GenerateNewFrozenTiles &&
+            frozenTileSpawnMode != FrozenTileSpawnMode.Both)
             return false;
 
-        return true;
+        return RollFrozenTileChance(y);
+    }
+
+    /// <summary>
+    /// Chance check shared by both frozen-tile paths (spawning new locked tiles on refill, and
+    /// occasionally freezing tiles already sitting on the board). Row 0 is the bottom of the
+    /// board (gravity pulls tiles down to y = 0 - see CollapseAndRefill), so rows within the
+    /// bottom frozenTileBottomRowCount rows roll at the full configured lockSpawnChance. Rows
+    /// above that band roll at a reduced chance instead of being excluded outright, so "bottom
+    /// N rows" reads as a priority region rather than a hard cutoff. Set frozenTileBottomRowCount
+    /// to 0 to disable the priority entirely (uniform chance across the whole board).
+    /// </summary>
+    private bool RollFrozenTileChance(int y)
+    {
+        float chance = lockSpawnChance;
+        if (frozenTileBottomRowCount > 0 && y >= frozenTileBottomRowCount)
+            chance *= frozenTileOutsideBottomRowsChanceMultiplier;
+
+        return Random.value < chance;
+    }
+
+    /// <summary>
+    /// FreezeExistingBottomRows / Both: after the board settles, give already-placed unlocked
+    /// tiles a chance to freeze in place (as opposed to GenerateNewFrozenTiles, which only rolls
+    /// for tiles being newly spawned during refill). Reuses the same bottom-row priority and
+    /// weighted option pool as the refill path, and SetLock() already drives the lock overlay's
+    /// SpriteRenderer, so the visual updates immediately with no further wiring needed.
+    /// </summary>
+    private void TryFreezeExistingSymbols()
+    {
+        if (frozenTileSpawnMode != FrozenTileSpawnMode.FreezeExistingBottomRows &&
+            frozenTileSpawnMode != FrozenTileSpawnMode.Both)
+            return;
+
+        for (int x = 0; x < width; x++)
+        {
+            for (int y = 0; y < height; y++)
+            {
+                var occ = grid[x, y].Occupant;
+                if (occ == null || occ.IsLocked) continue;
+                if (!RollFrozenTileChance(y)) continue;
+
+                var option = PickWeightedLockOption();
+                if (option == null) continue;
+
+                occ.SetLock(option.layers, option.behavior, option.movesPerLayer);
+            }
+        }
     }
 
     private LockSpawnOption PickWeightedLockOption()
@@ -1087,6 +1137,8 @@ public class Board : MonoBehaviour
         }
 
         if (anyMovement) yield return sequence.WaitForCompletion();
+
+        TryFreezeExistingSymbols();
     }
 
     #endregion
@@ -1174,7 +1226,7 @@ public class Board : MonoBehaviour
             maxHealth = playerHealth != null ? playerHealth.MaxHealth : 0,
             currentStageIndex = stageManager != null ? stageManager.CurrentStageIndex : -1,
             runSeed = stageManager != null ? stageManager.RunSeed : 0,
-            collectGoalProgress = stageManager != null ? stageManager.CurrentCollectProgress : 0,
+            collectGoalProgress = stageManager != null ? stageManager.GetCollectProgressSnapshot() : System.Array.Empty<int>(),
             cells = new CellSaveData[width * height]
         };
 

@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
 using TMPro;
@@ -135,16 +136,33 @@ public class UIManager : MonoBehaviour
     {
         if (goalText == null || stageManager == null) return;
 
-        goalText.text = stageManager.CurrentGoalType switch
+        switch (stageManager.CurrentGoalType)
         {
-            StageGoalType.Score =>
-                $"Score Goal: {(board != null ? board.CurrentScore : 0)}/{stageManager.CurrentGoalValue}",
-            StageGoalType.MoveCount =>
-                $"Moves Goal: {(board != null ? board.MoveCount : 0)}/{stageManager.CurrentGoalValue}",
-            StageGoalType.Collect =>
-                $"Collect {stageManager.CurrentGoalSymbolType}: {stageManager.CurrentCollectProgress}/{stageManager.CurrentGoalValue}",
-            _ => string.Empty
-        };
+            case StageGoalType.Score:
+                goalText.text = $"Score Goal: {(board != null ? board.CurrentScore : 0)}/{stageManager.CurrentGoalValue}";
+                break;
+            case StageGoalType.MoveCount:
+                goalText.text = $"Moves Goal: {(board != null ? board.MoveCount : 0)}/{stageManager.CurrentGoalValue}";
+                break;
+            case StageGoalType.Collect:
+                goalText.text = FormatCollectGoalText();
+                break;
+            default:
+                goalText.text = string.Empty;
+                break;
+        }
+    }
+
+    private string FormatCollectGoalText()
+    {
+        var entries = stageManager.CurrentCollectProgress;
+        if (entries == null || entries.Count == 0) return string.Empty;
+
+        var parts = new List<string>(entries.Count);
+        foreach (var entry in entries)
+            parts.Add($"{entry.SymbolType} {entry.Current}/{entry.Target}");
+
+        return "Collect: " + string.Join("   ", parts);
     }
 
     private void SetStageClearVisible(bool visible)

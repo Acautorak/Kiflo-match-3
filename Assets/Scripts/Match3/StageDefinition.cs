@@ -9,8 +9,9 @@ public class StageDefinition
 
     public StageGoalType goalType = StageGoalType.Score;
     public int goalValue = 1000;
-    [Tooltip("Only used when goalType = Collect: which symbol type the player needs to clear goalValue of.")]
-    public SymbolType goalSymbolType;
+    [Tooltip("Only used when goalType = Collect: one or more (symbolType, count) requirements - " +
+             "ALL of them must be satisfied to complete the stage.")]
+    public CollectGoalTarget[] collectTargets;
 
     public bool allowNonMatchingSwaps = true;
     public bool enableRandomSpecialOnGravity = false;
@@ -31,8 +32,16 @@ public enum StageGoalType
     None,
     Score,
     MoveCount,
-    /// <summary>Clear goalValue symbols of goalSymbolType (tracked via SymbolMatchedEvent).</summary>
+    /// <summary>Clear count of symbolType for every entry in collectTargets (tracked via SymbolMatchedEvent).</summary>
     Collect
+}
+
+/// <summary>One "clear `count` of `symbolType`" requirement within a Collect goal.</summary>
+[Serializable]
+public struct CollectGoalTarget
+{
+    public SymbolType symbolType;
+    public int count;
 }
 
 public enum FrozenTileSpawnMode

@@ -11,7 +11,7 @@ public class BoardSaveData
     public int maxHealth;
     public int currentStageIndex;
     public int runSeed;
-    public int collectGoalProgress;
+    public int[] collectGoalProgress;
     public CellSaveData[] cells; // flattened, index = x * height + y
 }
 

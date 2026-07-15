@@ -29,7 +29,7 @@ public class StageManager : MonoBehaviour
     private bool isStageCleared;
     private bool isStageClearPending;
     private int remainingGraceMoves;
-    private int collectGoalProgress;
+    private int[] collectProgressByTarget = System.Array.Empty<int>();
 
     public int CurrentStageIndex => currentStageIndex;
     public int RunSeed => runSeed;
@@ -40,8 +40,24 @@ public class StageManager : MonoBehaviour
     public string CurrentStageDescription => currentStage != null ? currentStage.description : null;
     public StageGoalType CurrentGoalType => currentStage != null ? currentStage.goalType : StageGoalType.None;
     public int CurrentGoalValue => currentStage != null ? currentStage.goalValue : 0;
-    public SymbolType CurrentGoalSymbolType => currentStage != null ? currentStage.goalSymbolType : default;
-    public int CurrentCollectProgress => collectGoalProgress;
+
+    /// <summary>One entry per Collect target: which symbol type, how many cleared so far, and the target count.</summary>
+    public readonly struct CollectGoalProgressEntry
+    {
+        public readonly SymbolType SymbolType;
+        public readonly int Current;
+        public readonly int Target;
+        public CollectGoalProgressEntry(SymbolType symbolType, int current, int target)
+        {
+            SymbolType = symbolType;
+            Current = current;
+            Target = target;
+        }
+    }
+
+    /// <summary>Empty when the current stage's goal isn't Collect.</summary>
+    public IReadOnlyList<CollectGoalProgressEntry> CurrentCollectProgress => BuildCollectProgressEntries();
+
     public int CurrentGracePeriodMoves => currentStage != null ? currentStage.gracePeriodMoves : 0;
     public float CurrentGracePeriodRandomSpecialChance => currentStage != null ? currentStage.gracePeriodRandomSpecialChance : 0f;
     public bool CurrentAllowsNonMatchingSwaps => currentStage != null && currentStage.allowNonMatchingSwaps;
@@ -54,6 +70,35 @@ public class StageManager : MonoBehaviour
     public bool IsStageCleared => isStageCleared;
     public bool IsStageClearPending => isStageClearPending;
     public int RemainingGraceMoves => remainingGraceMoves;
+
+    private List<CollectGoalProgressEntry> BuildCollectProgressEntries()
+    {
+        var list = new List<CollectGoalProgressEntry>();
+        var targets = currentStage?.collectTargets;
+        if (targets == null) return list;
+
+        for (int i = 0; i < targets.Length; i++)
+        {
+            int current = (collectProgressByTarget != null && i < collectProgressByTarget.Length)
+                ? collectProgressByTarget[i] : 0;
+            list.Add(new CollectGoalProgressEntry(targets[i].symbolType, current, targets[i].count));
+        }
+        return list;
+    }
+
+    /// <summary>Raw per-target progress, for SaveSystem to persist. Null-safe: never returns null.</summary>
+    public int[] GetCollectProgressSnapshot() =>
+        collectProgressByTarget != null ? (int[])collectProgressByTarget.Clone() : System.Array.Empty<int>();
+
+    private void InitializeCollectProgress(int[] savedProgress = null)
+    {
+        int count = currentStage?.collectTargets?.Length ?? 0;
+        collectProgressByTarget = new int[count];
+        if (savedProgress == null) return;
+
+        for (int i = 0; i < count && i < savedProgress.Length; i++)
+            collectProgressByTarget[i] = savedProgress[i];
+    }
 
     private void OnEnable()
     {
@@ -84,7 +129,7 @@ public class StageManager : MonoBehaviour
             currentStage = GetStage(currentStageIndex);
             isTransitioning = false;
             isStageCleared = false;
-            collectGoalProgress = saved.collectGoalProgress;
+            InitializeCollectProgress(saved.collectGoalProgress);
             EventBus.Publish(new StageStartedEvent(currentStageIndex, currentStage));
             Debug.Log($"[StageManager] Restored saved stage {currentStageIndex + 1}: {currentStage?.name}");
 
@@ -144,14 +189,14 @@ public class StageManager : MonoBehaviour
         return seed == 0 ? 1 : seed;
     }
 
-    public void LoadStageState(int index, int savedRunSeed = 0, int savedCollectGoalProgress = 0)
+    public void LoadStageState(int index, int savedRunSeed = 0, int[] savedCollectProgress = null)
     {
         runSeed = savedRunSeed;
         currentStageIndex = index;
         currentStage = GetStage(index);
         isTransitioning = false;
         isStageCleared = false;
-        collectGoalProgress = savedCollectGoalProgress;
+        InitializeCollectProgress(savedCollectProgress);
     }
 
     public void StartStage(int index)
@@ -174,7 +219,7 @@ public class StageManager : MonoBehaviour
         isStageCleared = false;
         isStageClearPending = false;
         remainingGraceMoves = 0;
-        collectGoalProgress = 0;
+        InitializeCollectProgress();
 
         if (gameManager != null)
             gameManager.SetState(GameManager.GameplayState.Idle);
@@ -259,11 +304,32 @@ public class StageManager : MonoBehaviour
     private void HandleSymbolMatched(SymbolMatchedEvent evt)
     {
         if (currentStage == null || currentStage.goalType != StageGoalType.Collect) return;
-        if (evt.Type != currentStage.goalSymbolType) return;
+        var targets = currentStage.collectTargets;
+        if (targets == null || collectProgressByTarget == null) return;
 
-        collectGoalProgress++;
-        if (collectGoalProgress >= currentStage.goalValue)
+        bool changed = false;
+        for (int i = 0; i < targets.Length; i++)
+        {
+            if (targets[i].symbolType != evt.Type) continue;
+            if (collectProgressByTarget[i] >= targets[i].count) continue;
+
+            collectProgressByTarget[i]++;
+            changed = true;
+        }
+
+        if (changed && AllCollectTargetsMet())
             CompleteStage();
+    }
+
+    private bool AllCollectTargetsMet()
+    {
+        var targets = currentStage?.collectTargets;
+        if (targets == null || targets.Length == 0) return false;
+
+        for (int i = 0; i < targets.Length; i++)
+            if (collectProgressByTarget[i] < targets[i].count)
+                return false;
+        return true;
     }
 
     private void CompleteStage()

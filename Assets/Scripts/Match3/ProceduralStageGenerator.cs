@@ -32,9 +32,12 @@ public static class ProceduralStageGenerator
                 stage.goalValue = config.moveCountGoal.Lerp(t);
                 break;
             case StageGoalType.Collect:
-                stage.goalValue = config.collectGoal.Lerp(t);
-                var symbolTypes = (SymbolType[])System.Enum.GetValues(typeof(SymbolType));
-                stage.goalSymbolType = symbolTypes[rng.Next(symbolTypes.Length)];
+                stage.collectTargets = GenerateCollectTargets(rng, t, config);
+                // goalValue isn't used to decide completion for Collect goals (every target must
+                // be met individually - see StageManager), but keep it populated with the combined
+                // total so anything reading it generically (logging, analytics) still gets a number.
+                stage.goalValue = 0;
+                foreach (var target in stage.collectTargets) stage.goalValue += target.count;
                 break;
             default:
                 stage.goalValue = config.scoreGoal.Lerp(t);
@@ -58,6 +61,27 @@ public static class ProceduralStageGenerator
         stage.frozenTileBottomRowCount = frozenUnlocked ? config.frozenTileBottomRowCount.Lerp(t) : 0;
 
         return stage;
+    }
+
+    /// <summary>Picks collectTargetCount.Lerp(t) distinct symbol types, each with its own count.Lerp(t) target.</summary>
+    private static CollectGoalTarget[] GenerateCollectTargets(System.Random rng, float t, StageGenerationConfig config)
+    {
+        var allTypes = (SymbolType[])System.Enum.GetValues(typeof(SymbolType));
+        int targetCount = Mathf.Clamp(config.collectTargetCount.Lerp(t), 1, allTypes.Length);
+
+        var pool = new List<SymbolType>(allTypes);
+        var targets = new CollectGoalTarget[targetCount];
+        for (int i = 0; i < targetCount; i++)
+        {
+            int pick = rng.Next(pool.Count);
+            targets[i] = new CollectGoalTarget
+            {
+                symbolType = pool[pick],
+                count = config.collectGoal.Lerp(t)
+            };
+            pool.RemoveAt(pick);
+        }
+        return targets;
     }
 
     /// <summary>
