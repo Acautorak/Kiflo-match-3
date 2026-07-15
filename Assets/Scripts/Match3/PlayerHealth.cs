@@ -47,6 +47,23 @@ public class PlayerHealth : MonoBehaviour
             EventBus.Publish(new GameOverEvent(0));
     }
 
+    /// <summary>Restores HP without changing maxHealth. Clamped to maxHealth.</summary>
+    public void Heal(int amount)
+    {
+        if (amount <= 0 || currentHealth <= 0) return;
+        currentHealth = Mathf.Min(maxHealth, currentHealth + amount);
+        PublishState();
+    }
+
+    /// <summary>Raises the health ceiling for the rest of this run (a powerup effect). Also heals by the same amount unless healToFull is set.</summary>
+    public void IncreaseMaxHealth(int amount, bool healToFull = false)
+    {
+        if (amount <= 0) return;
+        maxHealth += amount;
+        currentHealth = healToFull ? maxHealth : Mathf.Min(maxHealth, currentHealth + amount);
+        PublishState();
+    }
+
     private void InitializeHealth()
     {
         if (maxHealth <= 0)

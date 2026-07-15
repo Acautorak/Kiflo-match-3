@@ -133,3 +133,31 @@ public readonly struct LockLayerRemovedEvent
         FullyUnlocked = fullyUnlocked;
     }
 }
+
+/// <summary>
+/// Fired whenever a PlayerRunStats modifier changes (a powerup was picked, or the stats reset
+/// for a new run). UI can subscribe to this to show a live stats panel without polling.
+/// </summary>
+public readonly struct PlayerStatsChangedEvent
+{
+    public readonly PlayerRunStats Stats;
+    public PlayerStatsChangedEvent(PlayerRunStats stats) => Stats = stats;
+}
+
+/// <summary>
+/// Fired once PowerupManager has rolled which powerups to offer after a stage clears. UI shows
+/// Choices and calls PowerupManager.SelectPowerup() with the pick; the run doesn't advance to
+/// the next stage until that happens (see PowerupManager for the no-pool-configured fallback).
+/// </summary>
+public readonly struct PowerupChoicesOfferedEvent
+{
+    public readonly PowerupDefinition[] Choices;
+    public PowerupChoicesOfferedEvent(PowerupDefinition[] choices) => Choices = choices;
+}
+
+/// <summary>Fired right after a powerup's effect has been applied, before the next stage starts.</summary>
+public readonly struct PowerupSelectedEvent
+{
+    public readonly PowerupDefinition Powerup;
+    public PowerupSelectedEvent(PowerupDefinition powerup) => Powerup = powerup;
+}

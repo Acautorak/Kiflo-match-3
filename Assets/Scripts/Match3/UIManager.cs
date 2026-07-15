@@ -15,7 +15,6 @@ public class UIManager : MonoBehaviour
     [SerializeField] private TextMeshProUGUI goalText;
     [SerializeField] private TextMeshProUGUI messageText;
     [SerializeField] private Slider healthSlider;
-    [SerializeField] private Button nextStageButton;
     [SerializeField] private Button newRunButton;
     [SerializeField] private GameObject stageClearPanel;
     [SerializeField] private GameObject gameOverPanel;
@@ -49,9 +48,6 @@ public class UIManager : MonoBehaviour
 
     private void Start()
     {
-        if (nextStageButton != null)
-            nextStageButton.onClick.AddListener(HandleNextStageClicked);
-
         if (newRunButton != null)
             newRunButton.onClick.AddListener(HandleNewRunClicked);
 
@@ -91,12 +87,6 @@ public class UIManager : MonoBehaviour
     {
         SetStageClearVisible(true);
         SetMessage("Stage cleared!");
-    }
-
-    private void HandleNextStageClicked()
-    {
-        if (stageManager != null)
-            stageManager.AdvanceToNextStage();
     }
 
     private void HandleNewRunClicked()
@@ -169,9 +159,9 @@ public class UIManager : MonoBehaviour
     {
         if (stageClearPanel != null)
             stageClearPanel.SetActive(visible);
-
-        if (nextStageButton != null)
-            nextStageButton.gameObject.SetActive(visible);
+        // No button here anymore - PowerupManager/PowerupSelectionUI take over from here and
+        // call StageManager.AdvanceToNextStage() once a powerup is picked (or automatically if
+        // no Powerup Pool Config is assigned - see PowerupManager).
     }
 
     private void SetGameOverVisible(bool visible)

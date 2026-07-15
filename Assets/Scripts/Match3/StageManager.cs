@@ -9,6 +9,9 @@ public class StageManager : MonoBehaviour
     [SerializeField] private PlayerHealth playerHealth;
     [SerializeField] private GameManager gameManager;
     [SerializeField] private bool autoStartFirstStage = true;
+    [Tooltip("Optional. When assigned, gets reset every StartNewRun() and its BonusGraceMoves/" +
+             "RandomSpecialChanceBonus are folded into the stage-clear grace period below.")]
+    [SerializeField] private PlayerRunStats playerRunStats;
 
     [Header("Procedural Generation")]
     [Tooltip("Designer-tunable asset that drives generation - see StageGenerationConfig for every " +
@@ -255,6 +258,9 @@ public class StageManager : MonoBehaviour
         generatedStages.Clear();
         generatedLockPlacements.Clear();
 
+        if (playerRunStats != null)
+            playerRunStats.ResetForNewRun();
+
         if (board != null)
             board.ClearBoard();
 
@@ -341,7 +347,9 @@ public class StageManager : MonoBehaviour
         isTransitioning = true;
         isStageClearPending = true;
         isStageCleared = false;
-        remainingGraceMoves = currentStage.gracePeriodMoves;
+        int bonusGraceMoves = playerRunStats != null ? playerRunStats.BonusGraceMoves : 0;
+        float specialChanceBonus = playerRunStats != null ? playerRunStats.RandomSpecialChanceBonus : 0f;
+        remainingGraceMoves = currentStage.gracePeriodMoves + bonusGraceMoves;
 
         if (gameManager != null)
             gameManager.SetState(GameManager.GameplayState.GracePeriod);
@@ -352,7 +360,8 @@ public class StageManager : MonoBehaviour
         if (board != null)
         {
             Debug.Log($"[StageManager] Stage {currentStageIndex + 1} goal reached. Player has {remainingGraceMoves} extra moves before clear.");
-            board.BeginStageClearGracePeriod(remainingGraceMoves, currentStage.gracePeriodRandomSpecialChance);
+            float graceSpecialChance = Mathf.Clamp01(currentStage.gracePeriodRandomSpecialChance + specialChanceBonus);
+            board.BeginStageClearGracePeriod(remainingGraceMoves, graceSpecialChance);
         }
         else
         {

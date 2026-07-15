@@ -50,6 +50,12 @@ public class Board : MonoBehaviour
     [Header("Timing")]
     [SerializeField] private float swapDuration = 0.2f;
     [SerializeField] private float fallDuration = 0.25f;
+    [Tooltip("How many leftover symbols explode together per wave when a stage clears. Higher = faster overall cleanup.")]
+    [Min(1)]
+    [SerializeField] private int stageClearExplosionsPerWave = 4;
+    [Tooltip("Delay between each wave of leftover-symbol explosions during stage clear cleanup (not per-symbol - per wave).")]
+    [Min(0f)]
+    [SerializeField] private float stageClearExplosionWaveDelay = 0.05f;
 
     [Header("Rules")]
     [Tooltip("If true, any adjacent swap completes and stays, even if it doesn't create a match. " +
@@ -123,6 +129,10 @@ public class Board : MonoBehaviour
              "(see Start()) instead of populating/loading itself.")]
     [SerializeField] private StageManager stageManager;
     [SerializeField] private PlayerHealth playerHealth;
+    [Tooltip("Optional. When assigned, its RandomSpecialChanceBonus/LockChanceReduction/ScoreMultiplier " +
+             "modify every stage's baseline chances and score gains (see ApplyStageRules and the " +
+             "score-delta application sites) - this is how powerups picked between stages take effect.")]
+    [SerializeField] private PlayerRunStats playerRunStats;
 
     private Cell[,] grid;
     private Symbol selected;
@@ -348,9 +358,21 @@ public class Board : MonoBehaviour
         lockedTilesFallWithGravity = stage.lockedTilesFallWithGravity;
         frozenTileSpawnMode = stage.frozenTileSpawnMode;
         frozenTileBottomRowCount = stage.frozenTileBottomRowCount;
-        randomSpecialTriggerChance = stage.randomSpecialChance;
         maxConsecutiveRandomTriggers = stage.maxConsecutiveRandomTriggers;
-        lockSpawnChance = stage.lockSpawnChance;
+
+        // Player-run modifiers (from powerups picked between stages) shift the stage's baseline
+        // chances up/down rather than replacing them - see PlayerRunStats for what feeds these.
+        float specialBonus = playerRunStats != null ? playerRunStats.RandomSpecialChanceBonus : 0f;
+        float lockReduction = playerRunStats != null ? playerRunStats.LockChanceReduction : 0f;
+        randomSpecialTriggerChance = Mathf.Clamp01(stage.randomSpecialChance + specialBonus);
+        lockSpawnChance = Mathf.Clamp01(stage.lockSpawnChance - lockReduction);
+    }
+
+    /// <summary>Applies PlayerRunStats.ScoreMultiplier to a raw score gain before it's added to the board's score.</summary>
+    private int ApplyScoreMultiplier(int rawDelta)
+    {
+        if (rawDelta == 0 || playerRunStats == null) return rawDelta;
+        return Mathf.RoundToInt(rawDelta * playerRunStats.ScoreMultiplier);
     }
 
     private void ClearExistingSymbols()
@@ -609,6 +631,24 @@ public class Board : MonoBehaviour
             {
                 foreach (var p in group.Cells) allPositions.Add(p);
                 RegisterSpecialsFromMatchGroup(group, specialsToCreate);
+
+                // Color-targeted "heal on match" powerups roll their chance once per matched
+                // group here, before any clearing happens below, while the seed cell's Occupant
+                // is still valid. Baseline chance is 0 - only present if a powerup added to it.
+                if (playerRunStats != null)
+                {
+                    var seed = group.GetSeedCell();
+                    var seedOcc = grid[seed.x, seed.y].Occupant;
+                    if (seedOcc != null)
+                    {
+                        float healChance = playerRunStats.GetColorHealChance(seedOcc.Type);
+                        if (healChance > 0f && Random.value < healChance)
+                        {
+                            int healAmount = playerRunStats.GetColorHealAmount(seedOcc.Type);
+                            if (healAmount > 0) playerHealth?.Heal(healAmount);
+                        }
+                    }
+                }
             }
 
             // Any special symbols caught inside this match activate and pull in extra cells.
@@ -653,6 +693,7 @@ public class Board : MonoBehaviour
                 scoreDelta += delta;
                 if (isSpecialSeed && !destroyed) specialsToCreate.Remove(pos);
             }
+            scoreDelta = ApplyScoreMultiplier(scoreDelta);
             currentScore += scoreDelta;
             EventBus.Publish(new ScoreChangedEvent(currentScore, scoreDelta));
 
@@ -739,10 +780,19 @@ public class Board : MonoBehaviour
             if (grid[pos.x, pos.y].Occupant == symbol)
                 grid[pos.x, pos.y].Occupant = null;
 
-            symbol.transform.DOScale(0.15f, 0.15f).SetEase(Ease.InBack);
-            symbol.transform.DOScale(0f, 0.15f).SetEase(Ease.InBack);
-            Destroy(symbol.gameObject, 0.3f);
-            yield return new WaitForSeconds(0.25f);
+            // Was two independent DOScale calls on the same transform (fighting each other
+            // instead of actually popping) - Append them into a real grow-then-shrink sequence.
+            DOTween.Sequence()
+                .Append(symbol.transform.DOScale(0.15f, 0.1f).SetEase(Ease.InBack))
+                .Append(symbol.transform.DOScale(0f, 0.1f).SetEase(Ease.InBack));
+            Destroy(symbol.gameObject, 0.2f);
+
+            // Explode in waves (several symbols per pause) rather than one-by-one, so a full
+            // board doesn't take remaining.Count * delay seconds to finish clearing.
+            bool isLastInBoard = i == remaining.Count - 1;
+            bool isWaveBoundary = (i + 1) % stageClearExplosionsPerWave == 0;
+            if (!isLastInBoard && isWaveBoundary)
+                yield return new WaitForSeconds(stageClearExplosionWaveDelay);
         }
 
         isBusy = false;
@@ -823,9 +873,20 @@ public class Board : MonoBehaviour
             // else: the same hit that broke the lock also clears the tile - fall through
         }
 
+        var color = occ.Type;
         Destroy(occ.gameObject);
         grid[pos.x, pos.y].Occupant = null;
-        return (true, 10 * chainCount);
+
+        int baseScore = 10 * chainCount;
+        if (playerRunStats != null)
+        {
+            float colorMultiplierBonus = playerRunStats.GetColorScoreMultiplierBonus(color);
+            if (colorMultiplierBonus != 0f)
+                baseScore = Mathf.RoundToInt(baseScore * (1f + colorMultiplierBonus));
+            baseScore += playerRunStats.GetColorFlatScoreBonus(color);
+        }
+
+        return (true, baseScore);
     }
 
     /// <summary>Returns every grid position this special symbol clears, and publishes the open event.</summary>
@@ -913,6 +974,7 @@ public class Board : MonoBehaviour
             var (_, delta) = ClearCell(pos, 1);
             scoreDelta += delta;
         }
+        scoreDelta = ApplyScoreMultiplier(scoreDelta);
         currentScore += scoreDelta;
         EventBus.Publish(new ScoreChangedEvent(currentScore, scoreDelta));
 
@@ -966,6 +1028,7 @@ public class Board : MonoBehaviour
                 var (_, delta) = ClearCell(pos, chainCount);
                 scoreDelta += delta;
             }
+            scoreDelta = ApplyScoreMultiplier(scoreDelta);
             currentScore += scoreDelta;
             EventBus.Publish(new ScoreChangedEvent(currentScore, scoreDelta));
 
