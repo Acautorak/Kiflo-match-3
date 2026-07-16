@@ -152,4 +152,73 @@ public class PlayerRunStats : MonoBehaviour
         });
         EventBus.Publish(new PlayerStatsChangedEvent(this));
     }
+
+    /// <summary>Snapshots every accumulated modifier for SaveSystem. Called by Board.BuildSaveData.</summary>
+    public PlayerRunStatsSaveData BuildSaveData()
+    {
+        var data = new PlayerRunStatsSaveData
+        {
+            randomSpecialChanceBonus = randomSpecialChanceBonus,
+            lockChanceReduction = lockChanceReduction,
+            scoreMultiplier = scoreMultiplier,
+            bonusGraceMoves = bonusGraceMoves,
+            colorBonuses = new ColorBonusSaveData[colorBonuses.Count]
+        };
+
+        for (int i = 0; i < colorBonuses.Count; i++)
+        {
+            var b = colorBonuses[i];
+            data.colorBonuses[i] = new ColorBonusSaveData
+            {
+                color = b.color,
+                scoreMultiplierBonus = b.scoreMultiplierBonus,
+                flatScoreBonusPerCell = b.flatScoreBonusPerCell,
+                healChancePerMatch = b.healChancePerMatch,
+                healAmountOnMatch = b.healAmountOnMatch
+            };
+        }
+
+        return data;
+    }
+
+    /// <summary>
+    /// Restores every accumulated modifier from a save file, fully replacing current state
+    /// (not additive). Called by Board.LoadFromSave. Passing null resets to a fresh run's
+    /// baseline, same as ResetForNewRun().
+    /// </summary>
+    public void RestoreFromSave(PlayerRunStatsSaveData data)
+    {
+        if (data == null)
+        {
+            ResetForNewRun();
+            return;
+        }
+
+        randomSpecialChanceBonus = data.randomSpecialChanceBonus;
+        lockChanceReduction = data.lockChanceReduction;
+        scoreMultiplier = Mathf.Max(0f, data.scoreMultiplier);
+        bonusGraceMoves = Mathf.Max(0, data.bonusGraceMoves);
+        scoreMultiplierApplyCount = 0; // fresh diagnostic count for this session, not part of the save
+
+        colorBonuses.Clear();
+        if (data.colorBonuses != null)
+        {
+            foreach (var cb in data.colorBonuses)
+            {
+                colorBonuses.Add(new ColorBonus
+                {
+                    color = cb.color,
+                    scoreMultiplierBonus = cb.scoreMultiplierBonus,
+                    flatScoreBonusPerCell = cb.flatScoreBonusPerCell,
+                    healChancePerMatch = cb.healChancePerMatch,
+                    healAmountOnMatch = cb.healAmountOnMatch
+                });
+            }
+        }
+
+        Debug.Log($"[PlayerRunStats] Restored from save: scoreMultiplier={scoreMultiplier}, " +
+                  $"randomSpecialChanceBonus={randomSpecialChanceBonus}, lockChanceReduction={lockChanceReduction}, " +
+                  $"bonusGraceMoves={bonusGraceMoves}, colorBonuses={colorBonuses.Count}");
+        EventBus.Publish(new PlayerStatsChangedEvent(this));
+    }
 }

@@ -12,6 +12,7 @@ public class BoardSaveData
     public int currentStageIndex;
     public int runSeed;
     public int[] collectGoalProgress;
+    public PlayerRunStatsSaveData runStats;
     public CellSaveData[] cells; // flattened, index = x * height + y
 }
 
@@ -27,4 +28,25 @@ public class CellSaveData
     public LockBehavior lockBehavior;
     public int movesPerLayer;
     public int movesUntilNextAutoUnlock;
+}
+
+/// <summary>Persists PlayerRunStats' accumulated powerup modifiers - see PlayerRunStats.BuildSaveData/RestoreFromSave.</summary>
+[Serializable]
+public class PlayerRunStatsSaveData
+{
+    public float randomSpecialChanceBonus;
+    public float lockChanceReduction;
+    public float scoreMultiplier;
+    public int bonusGraceMoves;
+    public ColorBonusSaveData[] colorBonuses;
+}
+
+[Serializable]
+public class ColorBonusSaveData
+{
+    public SymbolType color;
+    public float scoreMultiplierBonus;
+    public int flatScoreBonusPerCell;
+    public float healChancePerMatch;
+    public int healAmountOnMatch;
 }

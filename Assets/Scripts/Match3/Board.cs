@@ -485,6 +485,38 @@ public class Board : MonoBehaviour
         selected = null;
     }
 
+    /// <summary>
+    /// Alternative to the click-then-click flow above: a single press-and-drag gesture on
+    /// `symbol` toward `direction` (one of the four cardinal Vector2Int directions - see
+    /// Symbol.cs for the gesture detection) immediately attempts a swap with whichever tile
+    /// sits in that direction, without needing a second tap. Both input modes work interchangeably
+    /// move to move - a player can click-then-click on one move and swipe the next.
+    /// </summary>
+    public void SwipeSymbol(Symbol symbol, Vector2Int direction)
+    {
+        // A swipe is a complete gesture on its own - don't let a pending click-selection
+        // (from an earlier single tap that never got a second tap) interfere with it.
+        selected = null;
+
+        if (IsGameBusy) return;
+        if (gameManager != null && !gameManager.AllowsPlayerInput) return;
+
+        if (symbol.IsLocked && !allowSwappingLockedTiles)
+        {
+            Debug.Log($"[Board] {symbol.name} at {symbol.GridPosition} is locked " +
+                       $"({symbol.LockBehaviorMode}, {symbol.LockLayers} layer(s) left) - swipe blocked.");
+            return;
+        }
+
+        var targetPos = symbol.GridPosition + direction;
+        if (targetPos.x < 0 || targetPos.x >= width || targetPos.y < 0 || targetPos.y >= height) return;
+
+        var target = grid[targetPos.x, targetPos.y].Occupant;
+        if (target == null) return;
+
+        StartCoroutine(TrySwap(symbol, target));
+    }
+
     private bool IsAdjacent(Vector2Int a, Vector2Int b) =>
         Mathf.Abs(a.x - b.x) + Mathf.Abs(a.y - b.y) == 1;
 
@@ -1290,6 +1322,7 @@ public class Board : MonoBehaviour
             currentStageIndex = stageManager != null ? stageManager.CurrentStageIndex : -1,
             runSeed = stageManager != null ? stageManager.RunSeed : 0,
             collectGoalProgress = stageManager != null ? stageManager.GetCollectProgressSnapshot() : System.Array.Empty<int>(),
+            runStats = playerRunStats != null ? playerRunStats.BuildSaveData() : null,
             cells = new CellSaveData[width * height]
         };
 
@@ -1329,6 +1362,8 @@ public class Board : MonoBehaviour
             if (data.maxHealth > 0)
                 playerHealth.SetHealth(data.currentHealth, data.maxHealth);
         }
+
+        playerRunStats?.RestoreFromSave(data.runStats);
 
         for (int x = 0; x < width; x++)
             for (int y = 0; y < height; y++)

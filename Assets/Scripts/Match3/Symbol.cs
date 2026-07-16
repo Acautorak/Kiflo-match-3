@@ -1,10 +1,17 @@
 using DG.Tweening;
 using UnityEngine;
+#if ENABLE_INPUT_SYSTEM
+using UnityEngine.InputSystem;
+#endif
 
 /// <summary>
 /// Attach to each symbol prefab (one prefab per SymbolType, or one shared prefab
 /// that swaps its sprite via SymbolVisualConfig - either works with Board.cs as written).
-/// Requires a Collider2D for click/tap input via OnMouseDown.
+/// Requires a Collider2D for click/tap input via OnMouseDown/Drag/Up. Both click-then-click
+/// (tap one tile, then tap an adjacent tile) and swipe (press one tile and drag toward a
+/// neighbor) work interchangeably, move to move - see OnMouseDrag/OnMouseUp below. OnMouseX
+/// callbacks fire for touch as well as mouse on supported platforms, so this covers both without
+/// separate touch-specific code.
 /// </summary>
 [DisallowMultipleComponent]
 [RequireComponent(typeof(Collider2D))]
@@ -16,6 +23,12 @@ public class Symbol : MonoBehaviour
 
     [SerializeField] private SpriteRenderer spriteRenderer;
     [SerializeField] private SymbolVisualConfig visualConfig;
+
+    [Header("Swipe Input (alternative to click-then-click)")]
+    [Tooltip("Minimum drag distance, in world units, before a press-and-drag counts as a swipe " +
+             "instead of a simple click/tap. Lower = more sensitive; too low can make normal taps " +
+             "misfire as swipes.")]
+    [SerializeField] private float swipeThreshold = 0.35f;
 
     [Header("Lock / Freeze (optional)")]
     [Tooltip("Child GameObject holding the frozen/locked look (e.g. an ice overlay sprite). " +
@@ -137,9 +150,65 @@ public class Symbol : MonoBehaviour
 
     private void OnDestroy() => activeTween?.Kill();
 
+    private Vector3 pressWorldPosition;
+    private bool isPressed;
+    private bool didSwipeThisPress;
+
     private void OnMouseDown()
     {
+        isPressed = true;
+        didSwipeThisPress = false;
+        pressWorldPosition = GetPointerWorldPosition();
+    }
+
+    private void OnMouseDrag()
+    {
+        if (!isPressed || didSwipeThisPress) return;
+
+        var delta = GetPointerWorldPosition() - pressWorldPosition;
+        if (delta.magnitude < swipeThreshold) return;
+
+        // Snap the drag to the dominant cardinal direction - swipes are always 4-directional,
+        // same as the grid itself, regardless of the exact drag angle.
+        var direction = Mathf.Abs(delta.x) > Mathf.Abs(delta.y)
+            ? new Vector2Int(delta.x > 0 ? 1 : -1, 0)
+            : new Vector2Int(0, delta.y > 0 ? 1 : -1);
+
+        didSwipeThisPress = true;
+        Board.Instance?.SwipeSymbol(this, direction);
+    }
+
+    private void OnMouseUp()
+    {
+        isPressed = false;
+
+        // A swipe already fired during this press (see OnMouseDrag) - don't also treat the
+        // release as a click, or this move would attempt to run twice.
+        if (didSwipeThisPress) return;
+
         Board.Instance?.SelectSymbol(this);
+    }
+
+    /// <summary>
+    /// Pointer position in world space, at this symbol's own depth (so it works regardless of
+    /// where exactly the board sits on the z-axis relative to the camera). Reads through the new
+    /// Input System's Pointer API when Active Input Handling includes it (covers mouse, pen, and
+    /// touch through one call), falling back to legacy Input.mousePosition otherwise - reading
+    /// UnityEngine.Input directly throws under "Input System Package (New)" only mode.
+    /// </summary>
+    private Vector3 GetPointerWorldPosition()
+    {
+        var cam = Camera.main;
+        if (cam == null) return transform.position;
+
+        Vector3 screenPos;
+#if ENABLE_INPUT_SYSTEM
+        screenPos = Pointer.current != null ? (Vector3)Pointer.current.position.ReadValue() : transform.position;
+#else
+        screenPos = Input.mousePosition;
+#endif
+        screenPos.z = cam.WorldToScreenPoint(transform.position).z;
+        return cam.ScreenToWorldPoint(screenPos);
     }
 }
 
