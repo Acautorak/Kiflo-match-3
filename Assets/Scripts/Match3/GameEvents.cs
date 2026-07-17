@@ -161,3 +161,81 @@ public readonly struct PowerupSelectedEvent
     public readonly PowerupDefinition Powerup;
     public PowerupSelectedEvent(PowerupDefinition powerup) => Powerup = powerup;
 }
+
+/// <summary>Fired when a Madness Symbol is cleared (matched or caught in a special), after its onClearedEffects have run.</summary>
+public readonly struct MadnessSymbolClearedEvent
+{
+    public readonly MadnessSymbolDefinition Definition;
+    public readonly Vector2Int Position;
+    public readonly int MovesSurvived;
+    public MadnessSymbolClearedEvent(MadnessSymbolDefinition definition, Vector2Int position, int movesSurvived)
+    {
+        Definition = definition;
+        Position = position;
+        MovesSurvived = movesSurvived;
+    }
+}
+
+/// <summary>Fired whenever MadnessMeter's value changes.</summary>
+public readonly struct MadnessMeterChangedEvent
+{
+    public readonly float Current;
+    public readonly float Max;
+    public MadnessMeterChangedEvent(float current, float max)
+    {
+        Current = current;
+        Max = max;
+    }
+}
+
+/// <summary>Fired when a Madness effect applies (or extends) a temporary per-color board modifier - e.g. MadnessIgniteColorEffect.</summary>
+public readonly struct ColorModifierAppliedEvent
+{
+    public readonly SymbolType Color;
+    public readonly int DurationMoves;
+    public ColorModifierAppliedEvent(SymbolType color, int durationMoves)
+    {
+        Color = color;
+        DurationMoves = durationMoves;
+    }
+}
+
+/// <summary>Fired when a temporary per-color board modifier's duration runs out.</summary>
+public readonly struct ColorModifierExpiredEvent
+{
+    public readonly SymbolType Color;
+    public ColorModifierExpiredEvent(SymbolType color) => Color = color;
+}
+
+/// <summary>
+/// Fired when existing board symbols are repainted to a new color in place (see Board.
+/// ConvertRandomSymbols / MadnessColorConvertEffect) - not a match or clear, just a color change.
+/// VFX can hook this for a "corruption spreading" flourish without touching gameplay code.
+/// </summary>
+public readonly struct SymbolsConvertedEvent
+{
+    public readonly SymbolType NewColor;
+    public readonly Vector2Int[] Positions;
+    public SymbolsConvertedEvent(SymbolType newColor, Vector2Int[] positions)
+    {
+        NewColor = newColor;
+        Positions = positions;
+    }
+}
+
+/// <summary>
+/// Fired when existing board symbols are each repainted to their own independently random color
+/// (see Board.RandomizeSymbolColors / MadnessRandomizeColorsEffect) - unlike
+/// SymbolsConvertedEvent, there's no single shared color here, so NewColors is parallel to
+/// Positions (NewColors[i] is the new color of Positions[i]).
+/// </summary>
+public readonly struct SymbolsRandomizedEvent
+{
+    public readonly Vector2Int[] Positions;
+    public readonly SymbolType[] NewColors;
+    public SymbolsRandomizedEvent(Vector2Int[] positions, SymbolType[] newColors)
+    {
+        Positions = positions;
+        NewColors = newColors;
+    }
+}

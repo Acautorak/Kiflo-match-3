@@ -12,6 +12,8 @@ public class StageManager : MonoBehaviour
     [Tooltip("Optional. When assigned, gets reset every StartNewRun() and its BonusGraceMoves/" +
              "RandomSpecialChanceBonus are folded into the stage-clear grace period below.")]
     [SerializeField] private PlayerRunStats playerRunStats;
+    [Tooltip("Optional. Run-scoped (not stage-scoped) - reset every StartNewRun() alongside PlayerRunStats and PlayerHealth.")]
+    [SerializeField] private MadnessMeter madnessMeter;
 
     [Header("Procedural Generation")]
     [Tooltip("Designer-tunable asset that drives generation - see StageGenerationConfig for every " +
@@ -260,6 +262,9 @@ public class StageManager : MonoBehaviour
 
         if (playerRunStats != null)
             playerRunStats.ResetForNewRun();
+
+        if (madnessMeter != null)
+            madnessMeter.ResetForNewRun();
 
         if (board != null)
             board.ClearBoard();

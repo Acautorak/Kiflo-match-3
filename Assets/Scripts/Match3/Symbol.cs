@@ -42,6 +42,28 @@ public class Symbol : MonoBehaviour
     [SerializeField] private SpriteRenderer lockOverlayRenderer;
     [SerializeField] private LockVisualConfig lockVisualConfig;
 
+    [Header("Madness (optional)")]
+    [Tooltip("Child GameObject holding the Madness look (e.g. a swirling overlay). Should be " +
+             "INACTIVE by default in the prefab, same as lockOverlay - Symbol just calls " +
+             "SetActive(true/false) on it based on Madness state.")]
+    [Min(0.01f)]
+    [SerializeField] private float convertPulseDuration = 0.35f;
+    [Tooltip("Peak scale multiplier reached mid-pulse.")]
+    [SerializeField] private float convertPulseScale = 1.25f;
+    [Tooltip("Color briefly flashed on the sprite at the pulse's peak, then eased back to normal. Leave white for a subtle flash.")]
+    [SerializeField] private Color convertFlashColor = Color.white;
+
+    private Color baseSpriteColor = Color.white;
+    private Tween convertTween;
+
+    private void Awake()
+    {
+        if (spriteRenderer != null) baseSpriteColor = spriteRenderer.color;
+    }
+    [SerializeField] private GameObject madnessOverlay;
+    [Tooltip("Optional: SpriteRenderer on madnessOverlay, swapped to the assigned MadnessSymbolDefinition's icon if both are set.")]
+    [SerializeField] private SpriteRenderer madnessOverlayRenderer;
+
     private Tween activeTween;
 
     public int LockLayers { get; private set; }
@@ -49,6 +71,10 @@ public class Symbol : MonoBehaviour
     public int MovesPerLayer { get; private set; }
     public int MovesUntilNextAutoUnlock { get; private set; }
     public bool IsLocked => LockLayers > 0;
+
+    public MadnessSymbolDefinition MadnessDefinition { get; private set; }
+    public int MadnessMovesSurvived { get; private set; }
+    public bool IsMadness => MadnessDefinition != null;
 
     public void Initialize(SymbolType type, SpecialType special, Vector2Int gridPosition)
     {
@@ -63,6 +89,37 @@ public class Symbol : MonoBehaviour
     {
         Special = special;
         UpdateVisual();
+    }
+
+    /// <summary>
+    /// Changes this symbol's color/type in place and refreshes its sprite - e.g. a Madness
+    /// "convert to color" effect repainting a tile (see MadnessColorConvertEffect / Board.
+    /// ConvertRandomSymbols). Purely cosmetic-plus-type: doesn't touch lock state, Madness state,
+    /// or Special.
+    /// </summary>
+    public void SetType(SymbolType newType)
+    {
+        Type = newType;
+        UpdateVisual();
+    }
+    public Tween PlayConvertHighlight()
+    {
+        convertTween?.Kill();
+        transform.localScale = Vector3.one;
+
+        var half = convertPulseDuration * 0.5f;
+        var seq = DOTween.Sequence();
+        seq.Append(transform.DOScale(convertPulseScale, half).SetEase(Ease.OutQuad));
+        seq.Append(transform.DOScale(1f, half).SetEase(Ease.InQuad));
+
+        if (spriteRenderer != null)
+        {
+            seq.Insert(0f, spriteRenderer.DOColor(convertFlashColor, half));
+            seq.Insert(half, spriteRenderer.DOColor(baseSpriteColor, half));
+        }
+
+        convertTween = seq;
+        return seq;
     }
 
     /// <summary>Applies a fresh lock. movesPerLayer only matters for LockBehavior.Temporary.</summary>
@@ -114,6 +171,37 @@ public class Symbol : MonoBehaviour
         return true;
     }
 
+    /// <summary>Marks this symbol as a Madness Symbol of the given definition. MovesSurvived starts at 0.</summary>
+    public void InitializeMadness(MadnessSymbolDefinition definition)
+    {
+        MadnessDefinition = definition;
+        MadnessMovesSurvived = 0;
+        UpdateMadnessVisual();
+    }
+
+    /// <summary>Strips Madness state back to a plain symbol (e.g. after it's been "defused" by some future effect).</summary>
+    public void ClearMadness()
+    {
+        MadnessDefinition = null;
+        MadnessMovesSurvived = 0;
+        UpdateMadnessVisual();
+    }
+
+    /// <summary>Call once per accepted player move this symbol survives unmatched (see Board.TickMadnessSurvival).</summary>
+    public void TickMadnessSurvival() => MadnessMovesSurvived++;
+
+    /// <summary>Used by detonate-then-reset style effects (e.g. MadnessGrowingDamageEffect) so the threat can build up again.</summary>
+    public void ResetMadnessSurvival() => MadnessMovesSurvived = 0;
+
+    private void UpdateMadnessVisual()
+    {
+        if (madnessOverlay == null) return;
+
+        madnessOverlay.SetActive(IsMadness);
+        if (IsMadness && madnessOverlayRenderer != null && MadnessDefinition.icon != null)
+            madnessOverlayRenderer.sprite = MadnessDefinition.icon;
+    }
+
     private void UpdateVisual()
     {
         if (spriteRenderer == null || visualConfig == null) return;
@@ -148,7 +236,11 @@ public class Symbol : MonoBehaviour
         return activeTween;
     }
 
-    private void OnDestroy() => activeTween?.Kill();
+    private void OnDestroy()
+    {
+        activeTween?.Kill();
+        convertTween?.Kill();
+    }
 
     private Vector3 pressWorldPosition;
     private bool isPressed;

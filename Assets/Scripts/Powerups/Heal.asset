@@ -22,3 +22,4 @@ MonoBehaviour:
   bonusGraceMoves: 0
   bonusMaxHealth: 0
   healAmount: 1
+  colorEffects: []

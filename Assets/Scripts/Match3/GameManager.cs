@@ -12,6 +12,10 @@ public class GameManager : MonoBehaviour
     /// ResolvingMatches: matches/cascades are being cleared, scored, and refilled.
     /// ResolvingSpecialMadness: a special-symbol activation or random "gravity bonus" effect
     /// is animating/calculating as part of the current cascade step.
+    /// ResolvingMadnessColorChange: a Madness effect is repainting other board symbols (Board.
+    /// ConvertRandomSymbols / RandomizeSymbolColors) and playing their staggered highlight
+    /// sequence. Same "something's animating mid-cascade" role as ResolvingSpecialMadness, just
+    /// its own state so UI can tell the two apart if it wants to (e.g. a different banner/SFX).
     /// MadnessBonusGameplay: reserved for a future dedicated bonus round - not implemented
     /// yet, nothing in the project currently transitions into or out of this state.
     /// GracePeriod: stage-clear goal was reached; player gets a few extra moves.
@@ -23,6 +27,7 @@ public class GameManager : MonoBehaviour
         Playing,
         ResolvingMatches,
         ResolvingSpecialMadness,
+        ResolvingMadnessColorChange,
         MadnessBonusGameplay,
         GracePeriod,
         StageClearing
@@ -36,7 +41,8 @@ public class GameManager : MonoBehaviour
     public GameplayState CurrentState => currentState;
     public bool AllowsBoardRefill => currentState == GameplayState.Playing
         || currentState == GameplayState.ResolvingMatches
-        || currentState == GameplayState.ResolvingSpecialMadness;
+        || currentState == GameplayState.ResolvingSpecialMadness
+        || currentState == GameplayState.ResolvingMadnessColorChange;
     public bool AllowsPlayerInput => currentState == GameplayState.Idle || currentState == GameplayState.GracePeriod;
 
     private void OnEnable()

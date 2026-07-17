@@ -24,7 +24,7 @@ MonoBehaviour:
   healAmount: 0
   colorEffects:
   - color: 2
-    scoreMultiplierBonus: 0
-    flatScoreBonusPerCell: 0
+    scoreMultiplierBonus: 0.01
+    flatScoreBonusPerCell: 1
     healChanceBonus: 0
     healAmountOnMatch: 1

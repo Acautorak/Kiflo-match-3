@@ -123,6 +123,29 @@ public class Board : MonoBehaviour
         new LockSpawnOption { layers = 1, behavior = LockBehavior.Permanent, weight = 1f },
     };
 
+    [Header("Madness Symbols - Auto Spawn On Refill (optional)")]
+    [Tooltip("If true, newly refilled tiles have a chance to spawn as a Madness Symbol, picked from Madness Spawn Options below.")]
+    [SerializeField] private bool spawnMadnessOnRefill = false;
+    [Range(0f, 1f)]
+    [SerializeField] private float madnessSpawnChance = 0.03f;
+    [Tooltip("Weighted pool of Madness Symbol definitions to draw from. Each entry's own `weight` field controls how often it's picked.")]
+    [SerializeField] private MadnessSpawnOption[] madnessSpawnOptions;
+    [Tooltip("If true, Madness Symbols act as wildcards during match detection - same as a Special " +
+             "symbol - joining whatever color run they're touching instead of needing their own Type " +
+             "to match. Purely a matching-rule toggle; spawning, effects, and visuals are unaffected.")]
+    [SerializeField] private bool treatMadnessSymbolsAsWildcards = false;
+    [Tooltip("Delay between each symbol's highlight pulse when a Madness effect converts/randomizes " +
+             "several symbols at once (ConvertRandomSymbols / RandomizeSymbolColors) - lets the change " +
+             "read as a one-by-one sequence instead of every symbol flashing simultaneously. 0 = simultaneous.")]
+    [Min(0f)]
+    [SerializeField] private float madnessConvertHighlightStagger = 0.06f;
+
+    [Header("Madness Symbols - Systems (optional)")]
+    [Tooltip("Tracks temporary board-wide/per-color rule modifiers Madness effects apply (e.g. an ignited color). Auto-found in Awake if left empty.")]
+    [SerializeField] private MadnessBoardModifiers madnessBoardModifiers;
+    [Tooltip("Run-scoped meter Madness effects can contribute to. Auto-found in Awake if left empty.")]
+    [SerializeField] private MadnessMeter madnessMeter;
+
     [Header("System References (auto-found in Awake if left empty)")]
     [Tooltip("Optional explicit link. If left empty, Board finds it in the scene at Awake. " +
              "Assign this if you want Board to wait for StageManager to drive initialization " +
@@ -160,6 +183,8 @@ public class Board : MonoBehaviour
         gameManager = FindAnyObjectByType<GameManager>();
         if (stageManager == null) stageManager = FindAnyObjectByType<StageManager>();
         if (playerHealth == null) playerHealth = FindAnyObjectByType<PlayerHealth>();
+        if (madnessBoardModifiers == null) madnessBoardModifiers = FindAnyObjectByType<MadnessBoardModifiers>();
+        if (madnessMeter == null) madnessMeter = FindAnyObjectByType<MadnessMeter>();
         Debug.Log($"[Board] Awake - grid {width}x{height}");
         grid = new Cell[width, height];
         for (int x = 0; x < width; x++)
@@ -217,7 +242,7 @@ public class Board : MonoBehaviour
     /// </summary>
     private IEnumerator ResolveAnyExistingMatches()
     {
-        var groups = MatchFinder.FindMatchGroups(grid, width, height);
+        var groups = MatchFinder.FindMatchGroups(grid, width, height, treatMadnessSymbolsAsWildcards);
         if (groups.Count == 0) yield break;
 
         Debug.Log($"[Board] Found {groups.Count} pre-existing match group(s) on start - resolving.");
@@ -272,6 +297,7 @@ public class Board : MonoBehaviour
         isBusy = false;
         isStageClearing = false;
         ResetStageClearGraceState();
+        madnessBoardModifiers?.Clear();
         EventBus.Publish(new ScoreChangedEvent(currentScore, 0));
     }
 
@@ -373,6 +399,163 @@ public class Board : MonoBehaviour
     {
         if (rawDelta == 0 || playerRunStats == null) return rawDelta;
         return Mathf.RoundToInt(rawDelta * playerRunStats.ScoreMultiplier);
+    }
+
+    /// <summary>
+    /// Adds bonus score outside the normal per-cell clear calculation - e.g. a Madness effect's
+    /// payout (see MadnessScoreGrowthEffect). Goes through the same score multiplier and event as
+    /// every other scoring path, so it stacks correctly with powerups.
+    /// </summary>
+    public void AddBonusScore(int amount)
+    {
+        if (amount == 0) return;
+        int delta = ApplyScoreMultiplier(amount);
+        currentScore += delta;
+        EventBus.Publish(new ScoreChangedEvent(currentScore, delta));
+    }
+
+    /// <summary>
+    /// Converts up to `count` randomly chosen board symbols to `toColor` in place - e.g. a Madness
+    /// effect "infecting" nearby tiles (see MadnessColorConvertEffect). Locked tiles are skipped
+    /// (same convention as other board-wide effects like the random-special rolls above), and
+    /// `excludePosition` - typically the Madness Symbol's own cell - is never a target. Pass
+    /// fromColor to only convert symbols currently of that one color; leave it null to make every
+    /// color eligible. Symbols already `toColor` are skipped so `count` isn't wasted on no-ops.
+    /// Returns the positions actually converted (may be fewer than `count` if not enough eligible
+    /// cells exist). This is a repaint only - it doesn't clear cells, award score, or deal damage;
+    /// combine with other effects for that.
+    /// </summary>
+    public List<Vector2Int> ConvertRandomSymbols(SymbolType? fromColor, SymbolType toColor, int count, Vector2Int? excludePosition = null)
+    {
+        var converted = new List<Vector2Int>();
+        if (count <= 0) return converted;
+
+        var candidates = new List<Vector2Int>();
+        for (int x = 0; x < width; x++)
+            for (int y = 0; y < height; y++)
+            {
+                var occ = grid[x, y].Occupant;
+                if (occ == null || occ.IsLocked) continue;
+                if (excludePosition.HasValue && x == excludePosition.Value.x && y == excludePosition.Value.y) continue;
+                if (fromColor.HasValue && occ.Type != fromColor.Value) continue;
+                if (occ.Type == toColor) continue;
+                candidates.Add(new Vector2Int(x, y));
+            }
+
+        for (int i = 0; i < count && candidates.Count > 0; i++)
+        {
+            int index = Random.Range(0, candidates.Count);
+            var pos = candidates[index];
+            candidates.RemoveAt(index);
+
+            grid[pos.x, pos.y].Occupant.SetType(toColor);
+            converted.Add(pos);
+        }
+
+        if (converted.Count > 0)
+        {
+            EventBus.Publish(new SymbolsConvertedEvent(toColor, converted.ToArray()));
+            StartCoroutine(PlayStaggeredConvertHighlights(converted));
+        }
+
+        return converted;
+    }
+
+    /// <summary>
+    /// Randomizes up to `count` other board symbols to independently random colors - unlike
+    /// ConvertRandomSymbols, each affected cell rolls its own color rather than all sharing one
+    /// target (see MadnessRandomizeColorsEffect). Locked tiles are skipped, and `excludePosition` -
+    /// typically the Madness Symbol's own cell - is never a target. When guaranteeColorChange is
+    /// true, a symbol won't randomly re-roll back onto its own current color (re-rolls a few times
+    /// rather than looping forever, so with very few SymbolType values it may rarely still repeat).
+    /// Returns the positions actually randomized (may be fewer than `count` if not enough eligible
+    /// cells exist).
+    /// </summary>
+    public List<Vector2Int> RandomizeSymbolColors(int count, Vector2Int? excludePosition = null, bool guaranteeColorChange = true)
+    {
+        var affected = new List<Vector2Int>();
+        if (count <= 0) return affected;
+
+        var candidates = new List<Vector2Int>();
+        for (int x = 0; x < width; x++)
+            for (int y = 0; y < height; y++)
+            {
+                var occ = grid[x, y].Occupant;
+                if (occ == null || occ.IsLocked) continue;
+                if (excludePosition.HasValue && x == excludePosition.Value.x && y == excludePosition.Value.y) continue;
+                candidates.Add(new Vector2Int(x, y));
+            }
+
+        var newColors = new List<SymbolType>();
+        for (int i = 0; i < count && candidates.Count > 0; i++)
+        {
+            int index = Random.Range(0, candidates.Count);
+            var pos = candidates[index];
+            candidates.RemoveAt(index);
+
+            var occ = grid[pos.x, pos.y].Occupant;
+            var newColor = RandomType();
+            if (guaranteeColorChange)
+            {
+                int guard = 0;
+                while (newColor == occ.Type && guard++ < 8) newColor = RandomType();
+            }
+
+            occ.SetType(newColor);
+            affected.Add(pos);
+            newColors.Add(newColor);
+        }
+
+        if (affected.Count > 0)
+        {
+            EventBus.Publish(new SymbolsRandomizedEvent(affected.ToArray(), newColors.ToArray()));
+            StartCoroutine(PlayStaggeredConvertHighlights(affected));
+        }
+
+        return affected;
+    }
+
+    /// <summary>
+    /// Plays Symbol.PlayConvertHighlight() across `positions` one at a time, waiting
+    /// madnessConvertHighlightStagger between each start, so a multi-symbol color change (from
+    /// ConvertRandomSymbols or RandomizeSymbolColors) reads as a sequence sweeping across the
+    /// board rather than everything flashing at once. Marks GameManager as
+    /// ResolvingMadnessColorChange while it runs (same one-shot-marker convention as the
+    /// ResolvingSpecialMadness calls elsewhere in this file - it deliberately doesn't restore the
+    /// resting state itself afterward, since whatever the enclosing match-resolution flow sets
+    /// next, or its own eventual RestoreGameManagerRestingState() call, is what should win).
+    /// Purely cosmetic and fire-and-forget otherwise - the actual color change already happened
+    /// synchronously before this runs, so match detection, scoring, etc. are unaffected either
+    /// way. Skips a position if its cell has since become empty (e.g. cleared by an unrelated
+    /// match before its turn in the sequence came up).
+    /// </summary>
+    private IEnumerator PlayStaggeredConvertHighlights(List<Vector2Int> positions)
+    {
+        gameManager?.SetState(GameManager.GameplayState.ResolvingMadnessColorChange);
+
+        foreach (var pos in positions)
+        {
+            var occ = grid[pos.x, pos.y].Occupant;
+            occ?.PlayConvertHighlight();
+
+            if (madnessConvertHighlightStagger > 0f)
+                yield return new WaitForSeconds(madnessConvertHighlightStagger);
+        }
+    }
+
+    /// <summary>
+    /// Builds a MadnessContext and runs every effect in `effects` against it. Shared by all three
+    /// trigger points (spawn, survived-move, cleared) - see MadnessSymbolDefinition for what each means.
+    /// </summary>
+    private void FireMadnessEffects(MadnessEffect[] effects, Symbol symbol, Vector2Int pos, int chainCount)
+    {
+        if (effects == null || effects.Length == 0 || symbol == null) return;
+
+        var ctx = new MadnessContext(this, playerHealth, playerRunStats, madnessBoardModifiers, madnessMeter,
+            symbol, pos, symbol.Type, symbol.MadnessMovesSurvived, chainCount);
+
+        foreach (var effect in effects)
+            effect?.Execute(ctx);
     }
 
     private void ClearExistingSymbols()
@@ -526,7 +709,7 @@ public class Board : MonoBehaviour
         gameManager?.SetState(GameManager.GameplayState.Playing);
         yield return SwapRoutine(a, b);
 
-        var matchGroups = MatchFinder.FindMatchGroups(grid, width, height);
+        var matchGroups = MatchFinder.FindMatchGroups(grid, width, height, treatMadnessSymbolsAsWildcards);
         Debug.Log($"[Board] Post-swap scan: {matchGroups.Count} group(s) - " +
                    string.Join(" | ", matchGroups.Select(g =>
                        $"cells={g.Cells.Count} lines={g.Lines.Count} intersection={g.IsIntersection} longestRun={g.LongestRun}")));
@@ -553,12 +736,12 @@ public class Board : MonoBehaviour
         {
             if (ShouldSkipRefillGeneration() || stageClearPendingAfterResolution)
             {
-                matchGroups = MatchFinder.FindMatchGroups(grid, width, height); // melting can reveal new matches
+                matchGroups = MatchFinder.FindMatchGroups(grid, width, height, treatMadnessSymbolsAsWildcards); // melting can reveal new matches
             }
             else
             {
                 yield return CollapseAndRefill();
-                matchGroups = MatchFinder.FindMatchGroups(grid, width, height); // melting can reveal new matches
+                matchGroups = MatchFinder.FindMatchGroups(grid, width, height, treatMadnessSymbolsAsWildcards); // melting can reveal new matches
             }
         }
 
@@ -570,6 +753,8 @@ public class Board : MonoBehaviour
             stageClearPendingAfterResolution = false;
             stageManager?.FinalizeStageClear();
         }
+
+        TickMadnessSurvival();
 
         isBusy = false;
         RestoreGameManagerRestingState();
@@ -635,6 +820,27 @@ public class Board : MonoBehaviour
             }
 
         return anyDestroyed;
+    }
+
+    /// <summary>
+    /// Called once per accepted player move, after any cascades from that move have fully
+    /// resolved. Every Madness Symbol still on the board - i.e. NOT cleared this move - ticks its
+    /// survived-move counter and fires its onSurvivedMoveEffects. Also ticks madnessBoardModifiers
+    /// down (e.g. an ignited color's remaining duration) on the same per-move cadence.
+    /// </summary>
+    private void TickMadnessSurvival()
+    {
+        for (int x = 0; x < width; x++)
+            for (int y = 0; y < height; y++)
+            {
+                var occ = grid[x, y].Occupant;
+                if (occ == null || !occ.IsMadness) continue;
+
+                occ.TickMadnessSurvival();
+                FireMadnessEffects(occ.MadnessDefinition.onSurvivedMoveEffects, occ, new Vector2Int(x, y), chainCount: 1);
+            }
+
+        madnessBoardModifiers?.TickMove();
     }
 
     #endregion
@@ -749,7 +955,7 @@ public class Board : MonoBehaviour
             yield return CollapseAndRefill();
             yield return TryRandomSpecialOnGravity(chainCount);
             gameManager?.SetState(GameManager.GameplayState.ResolvingMatches);
-            currentGroups = MatchFinder.FindMatchGroups(grid, width, height);
+            currentGroups = MatchFinder.FindMatchGroups(grid, width, height, treatMadnessSymbolsAsWildcards);
         }
 
         SaveSystem.Save(BuildSaveData());
@@ -906,17 +1112,35 @@ public class Board : MonoBehaviour
         }
 
         var color = occ.Type;
+
+        if (occ.IsMadness)
+        {
+            FireMadnessEffects(occ.MadnessDefinition.onClearedEffects, occ, pos, chainCount);
+            EventBus.Publish(new MadnessSymbolClearedEvent(occ.MadnessDefinition, pos, occ.MadnessMovesSurvived));
+        }
+
         Destroy(occ.gameObject);
         grid[pos.x, pos.y].Occupant = null;
 
         int baseScore = 10 * chainCount;
+        float colorMultiplierBonus = 0f;
+        int colorFlatBonus = 0;
+
         if (playerRunStats != null)
         {
-            float colorMultiplierBonus = playerRunStats.GetColorScoreMultiplierBonus(color);
-            if (colorMultiplierBonus != 0f)
-                baseScore = Mathf.RoundToInt(baseScore * (1f + colorMultiplierBonus));
-            baseScore += playerRunStats.GetColorFlatScoreBonus(color);
+            colorMultiplierBonus += playerRunStats.GetColorScoreMultiplierBonus(color);
+            colorFlatBonus += playerRunStats.GetColorFlatScoreBonus(color);
         }
+        if (madnessBoardModifiers != null)
+        {
+            colorMultiplierBonus += madnessBoardModifiers.GetColorScoreMultiplierBonus(color);
+            int igniteDamage = madnessBoardModifiers.GetColorDamagePerMatch(color);
+            if (igniteDamage > 0) playerHealth?.TakeDamage(igniteDamage);
+        }
+
+        if (colorMultiplierBonus != 0f)
+            baseScore = Mathf.RoundToInt(baseScore * (1f + colorMultiplierBonus));
+        baseScore += colorFlatBonus;
 
         return (true, baseScore);
     }
@@ -1092,7 +1316,7 @@ public class Board : MonoBehaviour
 
         // A forced bonus can itself create a fresh match (e.g. a color-clear leaving 3 in a
         // row after refill) - resolve that too, same as it would during normal play.
-        var groups = MatchFinder.FindMatchGroups(grid, width, height);
+        var groups = MatchFinder.FindMatchGroups(grid, width, height, treatMadnessSymbolsAsWildcards);
         if (groups.Count > 0) yield return ResolveMatches(groups);
 
         isBusy = false;
@@ -1172,6 +1396,26 @@ public class Board : MonoBehaviour
         return lockSpawnOptions[lockSpawnOptions.Length - 1];
     }
 
+    private bool ShouldSpawnMadnessOnRefill() => spawnMadnessOnRefill && Random.value < madnessSpawnChance;
+
+    private MadnessSymbolDefinition PickWeightedMadnessOption()
+    {
+        if (madnessSpawnOptions == null || madnessSpawnOptions.Length == 0) return null;
+
+        float total = madnessSpawnOptions.Sum(o => o.definition != null ? Mathf.Max(0f, o.weight) : 0f);
+        if (total <= 0f) return null;
+
+        float roll = Random.Range(0f, total);
+        float cumulative = 0f;
+        foreach (var o in madnessSpawnOptions)
+        {
+            if (o.definition == null) continue;
+            cumulative += Mathf.Max(0f, o.weight);
+            if (roll <= cumulative) return o.definition;
+        }
+        return madnessSpawnOptions[madnessSpawnOptions.Length - 1]?.definition;
+    }
+
     #endregion
 
     #region Collapse / Refill
@@ -1223,6 +1467,16 @@ public class Board : MonoBehaviour
                 {
                     var option = PickWeightedLockOption();
                     if (option != null) instance.SetLock(option.layers, option.behavior, option.movesPerLayer);
+                }
+
+                if (ShouldSpawnMadnessOnRefill())
+                {
+                    var madnessDef = PickWeightedMadnessOption();
+                    if (madnessDef != null)
+                    {
+                        instance.InitializeMadness(madnessDef);
+                        FireMadnessEffects(madnessDef.onSpawnedEffects, instance, new Vector2Int(x, y), chainCount: 0);
+                    }
                 }
 
                 grid[x, y].Occupant = instance;

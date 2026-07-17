@@ -45,9 +45,14 @@ public class MatchGroup
 /// </summary>
 public static class MatchFinder
 {
-    public static List<MatchGroup> FindMatchGroups(Cell[,] grid, int width, int height)
+    /// <param name="treatMadnessAsWildcard">
+    /// If true, cells whose Symbol.IsMadness is true act as wildcards - same as a Special symbol -
+    /// and join whatever color run they're touching instead of requiring their own Type to match.
+    /// Toggle lives on Board (see Board.treatMadnessSymbolsAsWildcards).
+    /// </param>
+    public static List<MatchGroup> FindMatchGroups(Cell[,] grid, int width, int height, bool treatMadnessAsWildcard = false)
     {
-        var lines = FindRuns(grid, width, height);
+        var lines = FindRuns(grid, width, height, treatMadnessAsWildcard);
         var groups = new List<MatchGroup>();
         if (lines.Count == 0) return groups;
 
@@ -88,22 +93,23 @@ public static class MatchFinder
     /// Raw straight-line runs of 3+, before merging. A cell whose Special != None is a
     /// wildcard: it doesn't force its own SymbolType, it just extends whatever color run
     /// it's touching (so Red, Red, Bomb counts as a 3-run of Red; Bomb, Bomb, Bomb alone
-    /// also counts, with no particular color required).
+    /// also counts, with no particular color required). When treatMadnessAsWildcard is true,
+    /// Madness Symbols get the exact same wildcard treatment alongside Special ones.
     /// </summary>
-    public static List<List<Vector2Int>> FindRuns(Cell[,] grid, int width, int height)
+    public static List<List<Vector2Int>> FindRuns(Cell[,] grid, int width, int height, bool treatMadnessAsWildcard = false)
     {
         var matches = new List<List<Vector2Int>>();
 
         for (int y = 0; y < height; y++)
         {
             int yCopy = y;
-            matches.AddRange(ScanLine(width, x => grid[x, yCopy].IsEmpty ? null : grid[x, yCopy].Occupant, x => new Vector2Int(x, yCopy)));
+            matches.AddRange(ScanLine(width, x => grid[x, yCopy].IsEmpty ? null : grid[x, yCopy].Occupant, x => new Vector2Int(x, yCopy), treatMadnessAsWildcard));
         }
 
         for (int x = 0; x < width; x++)
         {
             int xCopy = x;
-            matches.AddRange(ScanLine(height, y => grid[xCopy, y].IsEmpty ? null : grid[xCopy, y].Occupant, y => new Vector2Int(xCopy, y)));
+            matches.AddRange(ScanLine(height, y => grid[xCopy, y].IsEmpty ? null : grid[xCopy, y].Occupant, y => new Vector2Int(xCopy, y), treatMadnessAsWildcard));
         }
 
         return matches;
@@ -118,7 +124,7 @@ public static class MatchFinder
     /// Chocolate, Chocolate -> the single Strawberry doesn't "use up" Clear; Clear joins the
     /// chocolates instead).
     /// </summary>
-    private static List<List<Vector2Int>> ScanLine(int length, System.Func<int, Symbol> getSymbol, System.Func<int, Vector2Int> toCoord)
+    private static List<List<Vector2Int>> ScanLine(int length, System.Func<int, Symbol> getSymbol, System.Func<int, Vector2Int> toCoord, bool treatMadnessAsWildcard)
     {
         var result = new List<List<Vector2Int>>();
         var current = new List<(Vector2Int coord, bool isWildcard)>();
@@ -145,7 +151,10 @@ public static class MatchFinder
                 continue;
             }
 
-            if (symbol.Special != SpecialType.None)
+            bool isWildcard = symbol.Special != SpecialType.None
+                || (treatMadnessAsWildcard && symbol.IsMadness);
+
+            if (isWildcard)
             {
                 // Wildcard: joins the current run no matter what color it's carrying.
                 current.Add((toCoord(i), true));
