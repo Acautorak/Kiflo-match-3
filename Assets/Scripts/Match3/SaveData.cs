@@ -14,6 +14,10 @@ public class BoardSaveData
     public int[] collectGoalProgress;
     public PlayerRunStatsSaveData runStats;
     public CellSaveData[] cells; // flattened, index = x * height + y
+    public bool graceActive;
+    public int graceMovesRemaining;
+    public float graceRandomSpecialChance;
+    public bool isAwaitingPowerupSelection;
 }
 
 [Serializable]

@@ -107,10 +107,26 @@ public class GameManager : MonoBehaviour
         SetState(GameplayState.StageClearing);
     }
 
-    private void OnApplicationQuit() => board.SaveNow();
+    private void OnApplicationQuit()
+    {
+        if (board == null)
+        {
+            Debug.LogWarning("[GameManager] OnApplicationQuit called without a Board reference; skipping save.");
+            return;
+        }
+
+        board.SaveNow();
+    }
 
     private void OnApplicationPause(bool paused)
     {
-        if (paused) board.SaveNow();
+        if (!paused) return;
+        if (board == null)
+        {
+            Debug.LogWarning("[GameManager] OnApplicationPause called without a Board reference; skipping save.");
+            return;
+        }
+
+        board.SaveNow();
     }
 }

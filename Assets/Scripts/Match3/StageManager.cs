@@ -33,11 +33,13 @@ public class StageManager : MonoBehaviour
     private bool isTransitioning;
     private bool isStageCleared;
     private bool isStageClearPending;
+    private bool isAwaitingPowerupSelection;
     private int remainingGraceMoves;
     private int[] collectProgressByTarget = System.Array.Empty<int>();
 
     public int CurrentStageIndex => currentStageIndex;
     public int RunSeed => runSeed;
+    public bool IsAwaitingPowerupSelection => isAwaitingPowerupSelection;
 
     /// <summary>The full generated definition for the stage currently in play - read-only from the outside.</summary>
     public StageDefinition CurrentStage => currentStage;
@@ -194,14 +196,44 @@ public class StageManager : MonoBehaviour
         return seed == 0 ? 1 : seed;
     }
 
-    public void LoadStageState(int index, int savedRunSeed = 0, int[] savedCollectProgress = null)
+    public void LoadStageState(int index, int savedRunSeed = 0, int[] savedCollectProgress = null,
+        bool restoreGraceActive = false, int restoredGraceMovesRemaining = 0, bool awaitingPowerupSelection = false)
     {
         runSeed = savedRunSeed;
         currentStageIndex = index;
         currentStage = GetStage(index);
-        isTransitioning = false;
-        isStageCleared = false;
         InitializeCollectProgress(savedCollectProgress);
+
+        if (restoreGraceActive)
+        {
+            isTransitioning = true;
+            isStageClearPending = true;
+            isStageCleared = false;
+            isAwaitingPowerupSelection = false;
+            remainingGraceMoves = restoredGraceMovesRemaining;
+
+            if (gameManager != null)
+                gameManager.SetState(GameManager.GameplayState.GracePeriod);
+        }
+        else if (awaitingPowerupSelection)
+        {
+            isTransitioning = true;
+            isStageClearPending = false;
+            isStageCleared = true;
+            isAwaitingPowerupSelection = true;
+            remainingGraceMoves = 0;
+
+            if (gameManager != null)
+                gameManager.SetState(GameManager.GameplayState.Idle);
+        }
+        else
+        {
+            isTransitioning = false;
+            isStageClearPending = false;
+            isStageCleared = false;
+            isAwaitingPowerupSelection = false;
+            remainingGraceMoves = 0;
+        }
     }
 
     public void StartStage(int index)
@@ -223,6 +255,7 @@ public class StageManager : MonoBehaviour
         isTransitioning = false;
         isStageCleared = false;
         isStageClearPending = false;
+        isAwaitingPowerupSelection = false;
         remainingGraceMoves = 0;
         InitializeCollectProgress();
 
@@ -245,6 +278,7 @@ public class StageManager : MonoBehaviour
         if (board != null)
             board.ClearBoard();
 
+        isAwaitingPowerupSelection = false;
         StartStage(currentStageIndex + 1);
     }
 
@@ -282,6 +316,7 @@ public class StageManager : MonoBehaviour
         if (gameManager != null)
             gameManager.SetState(GameManager.GameplayState.StageClearing);
 
+        isAwaitingPowerupSelection = true;
         if (board != null)
         {
             Debug.Log($"[StageManager] Stage {currentStageIndex + 1} clearing after grace period.");

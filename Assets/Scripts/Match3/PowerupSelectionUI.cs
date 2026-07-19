@@ -18,7 +18,22 @@ public class PowerupSelectionUI : MonoBehaviour
 
     private void Start()
     {
-        if (panelRoot != null) panelRoot.SetActive(false);
+        if (panelRoot == null) return;
+
+        bool anySlotActive = false;
+        if (slots != null)
+        {
+            foreach (var slot in slots)
+            {
+                if (slot != null && slot.gameObject.activeSelf)
+                {
+                    anySlotActive = true;
+                    break;
+                }
+            }
+        }
+
+        if (!anySlotActive) panelRoot.SetActive(false);
     }
 
     private void HandleOffered(PowerupChoicesOfferedEvent evt)
