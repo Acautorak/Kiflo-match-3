@@ -166,6 +166,13 @@ public class Board : MonoBehaviour
 
     private void Awake()
     {
+        if (Instance != null && Instance != this)
+        {
+            Debug.LogWarning($"[Board] Duplicate Board instance detected on '{name}' - " +
+                              $"'{Instance.name}' already holds Instance. Destroying this one.");
+            Destroy(gameObject);
+            return;
+        }
         Instance = this;
         gameManager = FindAnyObjectByType<GameManager>();
         if (stageManager == null) stageManager = FindAnyObjectByType<StageManager>();
@@ -670,4 +677,9 @@ public class Board : MonoBehaviour
     }
 
     #endregion
+
+    private void OnDestroy()
+    {
+        if (Instance == this) Instance = null;
+    }
 }

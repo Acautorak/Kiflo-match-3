@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using UnityEngine;
 
 /// <summary>
 /// Global, static, type-based pub/sub event bus.
@@ -30,9 +31,19 @@ public static class EventBus
 
     public static void Publish<T>(T evt)
     {
-        if (handlers.TryGetValue(typeof(T), out var existing))
+        if (!handlers.TryGetValue(typeof(T), out var existing)) return;
+        if (existing is not Action<T> action) return;
+ 
+        foreach (var del in action.GetInvocationList())
         {
-            (existing as Action<T>)?.Invoke(evt);
+            try
+            {
+                ((Action<T>)del).Invoke(evt);
+            }
+            catch (Exception ex)
+            {
+                Debug.LogException(ex);
+            }
         }
     }
 
