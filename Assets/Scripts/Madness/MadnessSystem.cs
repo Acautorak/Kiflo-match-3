@@ -79,6 +79,7 @@ public class MadnessSystem
                 if (occ == null || !occ.IsMadness) continue;
 
                 occ.TickMadnessSurvival();
+                occ.TickMadnessImmunityMove(); // no-op unless ImmunityMode == Moves
                 FireEffects(occ.MadnessDefinition.onSurvivedMoveEffects, occ, new Vector2Int(x, y), chainCount: 1);
             }
 

@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 
 /// <summary>
@@ -17,6 +18,14 @@ public class SymbolSpawner
     private readonly Symbol[] symbolPrefabs;
     private readonly Transform symbolParent;
     private readonly GridModel grid;
+
+    // Pooled per current SymbolType rather than in one shared bucket, since projects using the
+    // per-type symbolPrefabs array have a genuinely different prefab/GameObject per type - an
+    // instance built from the Red prefab can't become Blue just by calling SetType. Nothing
+    // populates this unless a caller opts in via Despawn (see FreeSpinsController, which
+    // recycles reel symbols every spin instead of Destroy/Instantiate-ing them). Every other
+    // existing call site that still calls Object.Destroy directly is completely unaffected.
+    private readonly Dictionary<SymbolType, Queue<Symbol>> pool = new Dictionary<SymbolType, Queue<Symbol>>();
 
     public SymbolSpawner(GridModel grid, Symbol symbolPrefab, Symbol[] symbolPrefabs, Transform symbolParent)
     {
@@ -77,19 +86,65 @@ public class SymbolSpawner
     public Symbol Spawn(int x, int y, SymbolType type, SpecialType special, Vector3 worldPos,
         int lockLayers = 0, LockBehavior lockBehavior = LockBehavior.None, int movesPerLayer = 3)
     {
-        var prefab = GetPrefab(type);
-        if (prefab == null)
+        Symbol instance = TryTakeFromPool(type);
+        if (instance != null)
         {
-            Debug.LogError($"[SymbolSpawner] Spawn({x},{y},{type}) aborted - GetPrefab returned null");
-            return null;
+            instance.transform.position = worldPos;
+            instance.gameObject.SetActive(true);
+            instance.Initialize(type, special, new Vector2Int(x, y));
+        }
+        else
+        {
+            var prefab = GetPrefab(type);
+            if (prefab == null)
+            {
+                Debug.LogError($"[SymbolSpawner] Spawn({x},{y},{type}) aborted - GetPrefab returned null");
+                return null;
+            }
+
+            instance = Object.Instantiate(prefab, worldPos, Quaternion.identity, symbolParent);
+            instance.Initialize(type, special, new Vector2Int(x, y));
         }
 
-        var instance = Object.Instantiate(prefab, worldPos, Quaternion.identity, symbolParent);
-        instance.Initialize(type, special, new Vector2Int(x, y));
         if (lockLayers > 0 && lockBehavior != LockBehavior.None)
             instance.SetLock(lockLayers, lockBehavior, movesPerLayer);
 
         grid[x, y].Occupant = instance;
+        return instance;
+    }
+
+    /// <summary>
+    /// Returns `instance` to the pool (deactivated, still parented under symbolParent) instead of
+    /// destroying it, bucketed by its CURRENT Type so a later Spawn(type) can only reuse instances
+    /// that came from the matching prefab. Caller is responsible for clearing the grid slot itself
+    /// (SymbolSpawner doesn't know which cell, if any, currently references this instance) and for
+    /// not calling this on something also reachable elsewhere (e.g. mid-tween) since the pool takes
+    /// ownership from here.
+    /// </summary>
+    public void Despawn(Symbol instance)
+    {
+        if (instance == null) return;
+
+        instance.gameObject.SetActive(false);
+
+        if (!pool.TryGetValue(instance.Type, out var queue))
+        {
+            queue = new Queue<Symbol>();
+            pool[instance.Type] = queue;
+        }
+        queue.Enqueue(instance);
+    }
+
+    private Symbol TryTakeFromPool(SymbolType type)
+    {
+        if (!pool.TryGetValue(type, out var queue) || queue.Count == 0) return null;
+
+        Symbol instance;
+        do
+        {
+            instance = queue.Dequeue();
+        } while (instance == null && queue.Count > 0); // skip over any pooled instance destroyed elsewhere in the meantime
+
         return instance;
     }
 }

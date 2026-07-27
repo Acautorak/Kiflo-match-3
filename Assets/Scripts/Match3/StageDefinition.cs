@@ -25,6 +25,20 @@ public class StageDefinition
     [Range(0f, 1f)] public float randomSpecialChance = 0.05f;
     [Min(0)] public int maxConsecutiveRandomTriggers = 3;
     [Range(0f, 1f)] public float lockSpawnChance = 0.05f;
+
+    [Tooltip("Which feature mode this stage's Madness meter fill should request. Assigned by " +
+             "ProceduralStageGenerator from StageGenerationConfig.featureModeWeights - see " +
+             "MadnessFeatureTrigger, which reads this off StageManager.CurrentStage instead of " +
+             "using a single hardcoded feature id.")]
+    public MadnessFeatureModeChoice featureModeOnMeterFull = MadnessFeatureModeChoice.KebabKarnage;
+}
+
+/// <summary>Which feature-mode mini-game a stage's Madness meter fill requests. Add new entries here
+/// and in MadnessFeatureTrigger.ResolveFeatureId as more feature modes are built.</summary>
+public enum MadnessFeatureModeChoice
+{
+    KebabKarnage,
+    FreeSpins
 }
 
 public enum StageGoalType

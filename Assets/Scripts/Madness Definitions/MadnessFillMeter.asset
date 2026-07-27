@@ -12,4 +12,4 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 96417fdc1a51a7e439e16b4cd8f19907, type: 3}
   m_Name: MadnessFillMeter
   m_EditorClassIdentifier: Assembly-CSharp::MadnessFillMeterEffect
-  amount: 10
+  amount: 1

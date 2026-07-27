@@ -88,6 +88,23 @@ public class StageGenerationConfig : ScriptableObject
     };
     public IntRange frozenTileBottomRowCount = new IntRange { min = 1, max = 3 };
 
+    [Header("Madness Feature Mode")]
+    [Tooltip("Which feature mode a stage's Madness meter fill requests when it fills, weighted the " +
+             "same way as Goal above - e.g. weight Free Spins higher on stages where you want more " +
+             "score-swingy moments, or zero out an entry to disable it entirely for now.")]
+    public List<FeatureModeWeight> featureModeWeights = new List<FeatureModeWeight>
+    {
+        new FeatureModeWeight { mode = MadnessFeatureModeChoice.KebabKarnage, weight = 1f },
+        new FeatureModeWeight { mode = MadnessFeatureModeChoice.FreeSpins, weight = 1f },
+    };
+
     [Header("Rules (fixed - not scaled by difficulty)")]
     public bool allowNonMatchingSwaps = true;
+}
+
+[System.Serializable]
+public class FeatureModeWeight
+{
+    public MadnessFeatureModeChoice mode;
+    public float weight = 1f;
 }

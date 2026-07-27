@@ -42,6 +42,7 @@ public class PlayerRunStatsSaveData
     public float lockChanceReduction;
     public float scoreMultiplier;
     public int bonusGraceMoves;
+    public int kebabTapDamageBonus;
     public ColorBonusSaveData[] colorBonuses;
 }
 

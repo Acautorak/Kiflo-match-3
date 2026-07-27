@@ -28,6 +28,8 @@ public class PowerupDefinition : ScriptableObject
     public int bonusMaxHealth;
     [Tooltip("Immediate heal on pick, independent of bonusMaxHealth.")]
     public int healAmount;
+    [Tooltip("Added to PlayerRunStats.KebabTapDamageBonus - increases damage dealt per tap during Kebab Karnage (and future tap-based feature modes that read the same stat) for the rest of the run.")]
+    public int bonusKebabTapDamage;
 
     [Header("Per-Color Effect - leave empty to skip. Add one entry per color you want to buff.")]
     [Tooltip("Each entry targets one SymbolType. All three fields on an entry stack additively " +
@@ -61,6 +63,7 @@ public class PowerupDefinition : ScriptableObject
             stats.AddLockChanceReduction(lockChanceReduction);
             stats.AddScoreMultiplier(scoreMultiplierBonus);
             stats.AddBonusGraceMoves(bonusGraceMoves);
+            stats.AddKebabTapDamageBonus(bonusKebabTapDamage);
 
             if (colorEffects != null)
                 foreach (var ce in colorEffects)

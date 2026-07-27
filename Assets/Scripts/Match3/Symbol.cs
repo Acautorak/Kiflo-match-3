@@ -4,6 +4,19 @@ using UnityEngine;
 using UnityEngine.InputSystem;
 #endif
 
+/// <summary>How a Madness Symbol's temporary "can't be destroyed by a match" window counts down.
+/// None: no immunity (default - existing Madness Symbols are unaffected). Moves: counts down once
+/// per accepted player move regardless of whether this symbol gets matched (see
+/// MadnessSystem.TickSurvival / Symbol.TickMadnessImmunityMove). Matches: only counts down each
+/// time this symbol is actually caught in a resolved match (see MatchResolver.ClearCell /
+/// Symbol.TickMadnessImmunityMatch) - surviving moves untouched doesn't spend it.</summary>
+public enum MadnessImmunityMode
+{
+    None,
+    Moves,
+    Matches
+}
+
 /// <summary>
 /// Attach to each symbol prefab (one prefab per SymbolType, or one shared prefab
 /// that swaps its sprite via SymbolVisualConfig - either works with Board.cs as written).
@@ -63,6 +76,11 @@ public class Symbol : MonoBehaviour
     [SerializeField] private GameObject madnessOverlay;
     [Tooltip("Optional: SpriteRenderer on madnessOverlay, swapped to the assigned MadnessSymbolDefinition's icon if both are set.")]
     [SerializeField] private SpriteRenderer madnessOverlayRenderer;
+    [Tooltip("Optional child GameObject (e.g. a shield/glow sprite) shown while IsMadnessImmune is " +
+             "true, so players can tell this Madness Symbol currently can't be destroyed. Should be " +
+             "INACTIVE by default in the prefab, same as the other overlays. Leave unassigned if you " +
+             "don't want a distinct immunity visual yet.")]
+    [SerializeField] private GameObject madnessImmunityOverlay;
 
     private Tween activeTween;
 
@@ -75,6 +93,16 @@ public class Symbol : MonoBehaviour
     public MadnessSymbolDefinition MadnessDefinition { get; private set; }
     public int MadnessMovesSurvived { get; private set; }
     public bool IsMadness => MadnessDefinition != null;
+
+    /// <summary>Which countdown (if any) is currently protecting this Madness Symbol from being
+    /// destroyed when caught in a match. Set from MadnessSymbolDefinition on spawn - see
+    /// InitializeMadness. Deliberately separate from the Lock Layers system (SetLock/IsLocked):
+    /// that system's DestroySymbolWhenUnlocked/ScorePerLockHit/gravity-fall/swap-blocking toggles
+    /// are board-wide settings meant for ice-block-style obstacles, not per-symbol Madness
+    /// behavior, so this tracks its own independent counter instead of reusing LockLayers.</summary>
+    public MadnessImmunityMode ImmunityMode { get; private set; } = MadnessImmunityMode.None;
+    public int ImmunityRemaining { get; private set; }
+    public bool IsMadnessImmune => ImmunityMode != MadnessImmunityMode.None && ImmunityRemaining > 0;
 
     public void Initialize(SymbolType type, SpecialType special, Vector2Int gridPosition)
     {
@@ -171,11 +199,14 @@ public class Symbol : MonoBehaviour
         return true;
     }
 
-    /// <summary>Marks this symbol as a Madness Symbol of the given definition. MovesSurvived starts at 0.</summary>
+    /// <summary>Marks this symbol as a Madness Symbol of the given definition. MovesSurvived starts at 0.
+    /// Also applies the definition's immunity config (if any) - see MadnessSymbolDefinition.immunityMode.</summary>
     public void InitializeMadness(MadnessSymbolDefinition definition)
     {
         MadnessDefinition = definition;
         MadnessMovesSurvived = 0;
+        SetMadnessImmunity(definition != null ? definition.immunityMode : MadnessImmunityMode.None,
+            definition != null ? definition.immunityAmount : 0);
         UpdateMadnessVisual();
     }
 
@@ -184,17 +215,57 @@ public class Symbol : MonoBehaviour
     {
         MadnessDefinition = null;
         MadnessMovesSurvived = 0;
+        SetMadnessImmunity(MadnessImmunityMode.None, 0);
         UpdateMadnessVisual();
     }
 
     /// <summary>Call once per accepted player move this symbol survives unmatched (see Board.TickMadnessSurvival).</summary>
     public void TickMadnessSurvival() => MadnessMovesSurvived++;
 
+    /// <summary>Directly (re)arms immunity - normally driven by InitializeMadness off the definition,
+    /// but exposed so a future effect (e.g. a "shield this symbol" power-up) could grant/refresh it
+    /// at runtime too. amount &lt;= 0 clears immunity outright regardless of mode.</summary>
+    public void SetMadnessImmunity(MadnessImmunityMode mode, int amount)
+    {
+        ImmunityMode = amount > 0 ? mode : MadnessImmunityMode.None;
+        ImmunityRemaining = Mathf.Max(0, amount);
+        UpdateMadnessVisual();
+    }
+
+    /// <summary>Call once per accepted player move (see MadnessSystem.TickSurvival). No-op unless
+    /// ImmunityMode is Moves - Matches-mode immunity only counts down via TickMadnessImmunityMatch.</summary>
+    public void TickMadnessImmunityMove()
+    {
+        if (ImmunityMode != MadnessImmunityMode.Moves || ImmunityRemaining <= 0) return;
+
+        ImmunityRemaining--;
+        if (ImmunityRemaining <= 0) ImmunityMode = MadnessImmunityMode.None;
+        UpdateMadnessVisual();
+    }
+
+    /// <summary>Call once each time this symbol is caught in a resolved match while still immune
+    /// (see MatchResolver.ClearCell). No-op unless ImmunityMode is Matches. Returns true if this
+    /// hit was the one that used up the last charge, so the caller can fall through to a normal
+    /// destroy on the very same hit instead of needing a follow-up match.</summary>
+    public bool TickMadnessImmunityMatch()
+    {
+        if (ImmunityMode != MadnessImmunityMode.Matches || ImmunityRemaining <= 0) return false;
+
+        ImmunityRemaining--;
+        bool expired = ImmunityRemaining <= 0;
+        if (expired) ImmunityMode = MadnessImmunityMode.None;
+        UpdateMadnessVisual();
+        return expired;
+    }
+
     /// <summary>Used by detonate-then-reset style effects (e.g. MadnessGrowingDamageEffect) so the threat can build up again.</summary>
     public void ResetMadnessSurvival() => MadnessMovesSurvived = 0;
 
     private void UpdateMadnessVisual()
     {
+        if (madnessImmunityOverlay != null)
+            madnessImmunityOverlay.SetActive(IsMadnessImmune);
+
         if (madnessOverlay == null) return;
 
         madnessOverlay.SetActive(IsMadness);

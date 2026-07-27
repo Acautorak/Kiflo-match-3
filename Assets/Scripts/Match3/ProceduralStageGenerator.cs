@@ -60,6 +60,9 @@ public static class ProceduralStageGenerator
             : FrozenTileSpawnMode.None;
         stage.frozenTileBottomRowCount = frozenUnlocked ? config.frozenTileBottomRowCount.Lerp(t) : 0;
 
+        stage.featureModeOnMeterFull = WeightedPool.Pick(config.featureModeWeights, w => w.weight, rng)?.mode
+            ?? MadnessFeatureModeChoice.KebabKarnage;
+
         return stage;
     }
 

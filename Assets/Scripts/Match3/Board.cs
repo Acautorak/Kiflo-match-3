@@ -30,6 +30,16 @@ public class Board : MonoBehaviour
     [Header("Timing")]
     [SerializeField] private float swapDuration = 0.2f;
     [SerializeField] private float fallDuration = 0.25f;
+
+    [Header("Free Spins")]
+    [Tooltip("Delay before each successive reel/column starts spinning - 0 = every column starts simultaneously.")]
+    [Min(0f)] [SerializeField] private float freeSpinsColumnStartStagger = 0.08f;
+    [Tooltip("How long each reel visibly tumbles through quick random rerolls before its final landing roll. 0 = skip tumbling and land immediately (the original single-fall behavior).")]
+    [Min(0f)] [SerializeField] private float freeSpinsReelSpinDuration = 0.6f;
+    [Tooltip("How fast each tumble step cycles while a reel is spinning - lower = faster flicker. Only matters while Free Spins Reel Spin Duration > 0.")]
+    [Min(0.01f)] [SerializeField] private float freeSpinsReelTumbleStepDuration = 0.08f;
+    [Tooltip("How many forced explosions to chain together (via the Random Special Effect / Gravity Bonus mechanism) when a spin lands with no natural match. 1 = a single blast; higher values build a bigger forced combo before the normal cascade check.")]
+    [Min(1)] [SerializeField] private int freeSpinsMinimumForcedChain = 1;
     [Tooltip("How many leftover symbols explode together per wave when a stage clears. Higher = faster overall cleanup.")]
     [Min(1)]
     [SerializeField] private int stageClearExplosionsPerWave = 4;
@@ -147,6 +157,7 @@ public class Board : MonoBehaviour
     private BoardSaveIO saveIO;
     private SwapController swapController;
     private MatchResolver matchResolver;
+    private FreeSpinsController freeSpinsController;
     private bool isBusy;
     private bool isStageClearing;
     private GameManager gameManager;
@@ -225,6 +236,9 @@ public class Board : MonoBehaviour
             RandomSpecialTriggerChance = randomSpecialTriggerChance,
             EnableRandomSpecialOnGravity = enableRandomSpecialOnGravity
         };
+
+        freeSpinsController = new FreeSpinsController(grid, symbolSpawner, matchResolver, gameManager, this, fallDuration, GridToWorld,
+            freeSpinsColumnStartStagger, freeSpinsReelSpinDuration, freeSpinsReelTumbleStepDuration, freeSpinsMinimumForcedChain);
     }
 
     private void Start()
@@ -456,6 +470,15 @@ public class Board : MonoBehaviour
 
     public List<Vector2Int> RandomizeSymbolColors(int count, Vector2Int? excludePosition = null, bool guaranteeColorChange = true) =>
         madnessSystem.RandomizeSymbolColors(count, excludePosition, guaranteeColorChange);
+
+    /// <summary>
+    /// Runs exactly one Free Spins reel spin (reroll every column, land, guarantee a match, resolve
+    /// it through the normal MatchResolver pipeline). Entry point for FreeSpinsManager, which owns
+    /// the SPIN button and spin-count bookkeeping and is expected to only call this while
+    /// GameManager is in FeatureMode - Board doesn't check that itself here, same as
+    /// ConvertRandomSymbols/RandomizeSymbolColors above trusting their own callers.
+    /// </summary>
+    public IEnumerator PlayFreeSpin() => freeSpinsController.SpinOnce();
 
     private void ClearExistingSymbols()
     {

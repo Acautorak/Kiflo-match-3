@@ -16,6 +16,7 @@ public class PlayerRunStats : MonoBehaviour
     [SerializeField] private float lockChanceReduction = 0f;
     [SerializeField] private float scoreMultiplier = 1f;
     [SerializeField] private int bonusGraceMoves = 0;
+    [SerializeField] private int kebabTapDamageBonus = 0;
 
     /// <summary>
     /// Per-color score modifiers accumulated from powerups (see PowerupDefinition.colorEffects).
@@ -46,6 +47,8 @@ public class PlayerRunStats : MonoBehaviour
     public float ScoreMultiplier => Mathf.Max(0f, scoreMultiplier);
     /// <summary>Added to a stage's gracePeriodMoves.</summary>
     public int BonusGraceMoves => Mathf.Max(0, bonusGraceMoves);
+    /// <summary>Added to the base 1 tap damage dealt to Kebab Karnage asteroids per tap (see KebabKarnageManager).</summary>
+    public int KebabTapDamageBonus => Mathf.Max(0, kebabTapDamageBonus);
 
     public void ResetForNewRun()
     {
@@ -53,6 +56,7 @@ public class PlayerRunStats : MonoBehaviour
         lockChanceReduction = 0f;
         scoreMultiplier = 1f;
         bonusGraceMoves = 0;
+        kebabTapDamageBonus = 0;
         scoreMultiplierApplyCount = 0;
         colorBonuses.Clear();
         EventBus.Publish(new PlayerStatsChangedEvent(this));
@@ -89,6 +93,14 @@ public class PlayerRunStats : MonoBehaviour
     {
         if (amount == 0) return;
         bonusGraceMoves = Mathf.Max(0, bonusGraceMoves + amount);
+        EventBus.Publish(new PlayerStatsChangedEvent(this));
+    }
+
+    /// <summary>Permanent (run-long) increase to Kebab Karnage tap damage, e.g. from a PowerupDefinition.</summary>
+    public void AddKebabTapDamageBonus(int amount)
+    {
+        if (amount == 0) return;
+        kebabTapDamageBonus = Mathf.Max(0, kebabTapDamageBonus + amount);
         EventBus.Publish(new PlayerStatsChangedEvent(this));
     }
 
@@ -162,6 +174,7 @@ public class PlayerRunStats : MonoBehaviour
             lockChanceReduction = lockChanceReduction,
             scoreMultiplier = scoreMultiplier,
             bonusGraceMoves = bonusGraceMoves,
+            kebabTapDamageBonus = kebabTapDamageBonus,
             colorBonuses = new ColorBonusSaveData[colorBonuses.Count]
         };
 
@@ -198,6 +211,7 @@ public class PlayerRunStats : MonoBehaviour
         lockChanceReduction = data.lockChanceReduction;
         scoreMultiplier = Mathf.Max(0f, data.scoreMultiplier);
         bonusGraceMoves = Mathf.Max(0, data.bonusGraceMoves);
+        kebabTapDamageBonus = Mathf.Max(0, data.kebabTapDamageBonus);
         scoreMultiplierApplyCount = 0; // fresh diagnostic count for this session, not part of the save
 
         colorBonuses.Clear();
@@ -218,7 +232,7 @@ public class PlayerRunStats : MonoBehaviour
 
         Debug.Log($"[PlayerRunStats] Restored from save: scoreMultiplier={scoreMultiplier}, " +
                   $"randomSpecialChanceBonus={randomSpecialChanceBonus}, lockChanceReduction={lockChanceReduction}, " +
-                  $"bonusGraceMoves={bonusGraceMoves}, colorBonuses={colorBonuses.Count}");
+                  $"bonusGraceMoves={bonusGraceMoves}, kebabTapDamageBonus={kebabTapDamageBonus}, colorBonuses={colorBonuses.Count}");
         EventBus.Publish(new PlayerStatsChangedEvent(this));
     }
 }

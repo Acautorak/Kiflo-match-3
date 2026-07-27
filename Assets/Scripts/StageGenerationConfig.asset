@@ -67,7 +67,7 @@ MonoBehaviour:
     max: 0.15
   maxConsecutiveRandomTriggers:
     min: 5
-    max: 8
+    max: 13
   destroySymbolWhenUnlocked: 1
   lockedTilesFallWithGravity: 1
   initialLocksUnlockDepth: 2
@@ -102,4 +102,9 @@ MonoBehaviour:
   frozenTileBottomRowCount:
     min: 1
     max: 3
+  featureModeWeights:
+  - mode: 0
+    weight: 1
+  - mode: 1
+    weight: 4
   allowNonMatchingSwaps: 1

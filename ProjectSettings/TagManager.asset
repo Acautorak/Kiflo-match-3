@@ -44,6 +44,9 @@ TagManager:
   - name: Symbols
     uniqueID: 3520086805
     locked: 0
+  - name: Feature
+    uniqueID: 1060354965
+    locked: 0
   m_RenderingLayers:
   - Default
   - Light Layer 1

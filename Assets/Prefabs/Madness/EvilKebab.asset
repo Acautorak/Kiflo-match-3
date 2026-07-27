@@ -15,7 +15,10 @@ MonoBehaviour:
   title: Evil Kebab
   description: 
   icon: {fileID: 21300000, guid: 9c35df1b5ea5728478646a820401d15b, type: 3}
-  onSpawnedEffects: []
+  immunityMode: 1
+  immunityAmount: 2
+  onSpawnedEffects:
+  - {fileID: 11400000, guid: 484e2ded62cc8cc4f801866e0f493cb6, type: 2}
   onSurvivedMoveEffects: []
   onClearedEffects:
   - {fileID: 11400000, guid: 63c6dce041e5fc54993ccf40ca47dfb2, type: 2}

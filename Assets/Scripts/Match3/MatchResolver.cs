@@ -239,6 +239,18 @@ public class MatchResolver
             // else: the same hit that broke the lock also clears the tile - fall through
         }
 
+        // Madness immunity: this symbol got swept into the match group like anything else (other
+        // cells in the group above/below this call still cleared/scored normally), but it shrugs
+        // this hit off instead of being destroyed - no score for a no-op hit, and onClearedEffects
+        // below is skipped entirely since it hasn't actually been cleared. Matches-mode immunity
+        // spends one charge per hit; Moves-mode immunity is untouched here (it only counts down
+        // via MadnessSystem.TickSurvival once per move, regardless of being matched).
+        if (occ.IsMadness && occ.IsMadnessImmune)
+        {
+            occ.TickMadnessImmunityMatch();
+            return (false, 0);
+        }
+
         var color = occ.Type;
 
         if (occ.IsMadness)
