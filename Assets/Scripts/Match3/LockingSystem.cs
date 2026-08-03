@@ -93,7 +93,12 @@ public class LockingSystem
                 bool fullyUnlocked = !occ.IsLocked;
                 EventBus.Publish(new LockLayerRemovedEvent(pos, occ.LockLayers, triggeredByMatch: false, fullyUnlocked));
 
-                if (fullyUnlocked && DestroySymbolWhenUnlocked)
+                // A Madness Symbol that's currently immune shrugs this off too, same as it would
+                // in MatchResolver.ClearCell - it fully sheds the lock (fullyUnlocked stays true,
+                // no further melting will re-trigger on it) but doesn't get destroyed alongside it.
+                bool immune = occ.IsMadness && occ.IsMadnessImmune;
+
+                if (fullyUnlocked && DestroySymbolWhenUnlocked && !immune)
                 {
                     Object.Destroy(occ.gameObject);
                     grid[x, y].Occupant = null;

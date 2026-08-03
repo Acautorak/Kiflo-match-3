@@ -34,6 +34,10 @@ public class GameManager : MonoBehaviour
     /// Spins' own mini-game legitimately doing work, not something trying to escape it.
     /// GracePeriod: stage-clear goal was reached; player gets a few extra moves.
     /// StageClearing: stage-clear cleanup animation, or game-over lockout.
+    /// Popup: a modal popup (tutorial step, powerup choice, confirmation dialog, etc. - see
+    /// PopupManager) is on screen. Blocks input the same way FeatureMode does, but is expected
+    /// to be short-lived and always resumes whatever state was active before it opened (see
+    /// EnterPopup/ExitPopup) rather than driving its own gameplay.
     /// </summary>
     public enum GameplayState
     {
@@ -46,11 +50,21 @@ public class GameManager : MonoBehaviour
         FeatureMode,
         ResolvingFreeSpin,
         GracePeriod,
-        StageClearing
+        StageClearing,
+        Popup
     }
 
     [SerializeField] private Board board;
     [SerializeField] private StageManager stageManager;
+
+    [Header("Popup Time Scale")]
+    [Tooltip("Time.timeScale applied for the whole duration a popup is showing - everything " +
+             "using default (scaled-time) tweens/coroutines, e.g. cascade drops and highlight " +
+             "sequences, will visibly slow down or freeze along with it. 0 = fully frozen, a " +
+             "small value like 0.05 = dramatic slow-mo instead of a hard freeze. UI button clicks " +
+             "still work regardless, since uGUI input isn't timeScale-dependent.")]
+    [Range(0f, 1f)]
+    [SerializeField] private float popupTimeScale = 0.05f;
 
     private void Awake()
     {
@@ -71,6 +85,18 @@ public class GameManager : MonoBehaviour
 
     private GameplayState currentState = GameplayState.Idle;
     private GameplayState stateBeforeFeatureMode = GameplayState.Idle;
+    private GameplayState stateBeforePopup = GameplayState.Idle;
+    private int popupTimeScaleHandle = -1;
+
+    /// <summary>
+    /// Tracks whether FeatureMode is active independent of currentState, specifically so
+    /// ExitFeatureMode still works correctly if a popup is currently covering FeatureMode (i.e.
+    /// currentState == Popup while the mini-game underneath has actually ended). Checking
+    /// currentState == FeatureMode alone would make ExitFeatureMode silently no-op in that case,
+    /// leaving stateBeforePopup pointing at FeatureMode and wrongly resuming it once the popup
+    /// closes, even though the mini-game already finished. See ExitFeatureMode.
+    /// </summary>
+    private bool featureModeActive;
 
     public GameplayState CurrentState => currentState;
     public bool AllowsBoardRefill => currentState == GameplayState.Playing
@@ -79,9 +105,10 @@ public class GameManager : MonoBehaviour
         || currentState == GameplayState.ResolvingMadnessColorChange
         || currentState == GameplayState.ResolvingFreeSpin;
     public bool AllowsPlayerInput => currentState == GameplayState.Idle || currentState == GameplayState.GracePeriod;
-    /// <summary>True for the whole Free Spins span, not just the FeatureMode "waiting for the next
-    /// spin" moments - ResolvingFreeSpin (a spin's own cascade resolving) counts too.</summary>
-    public bool IsInFeatureMode => currentState == GameplayState.FeatureMode || currentState == GameplayState.ResolvingFreeSpin;
+    /// <summary>True for the whole Free Spins span, including while a popup is momentarily
+    /// covering FeatureMode - see featureModeActive.</summary>
+    public bool IsInFeatureMode => featureModeActive;
+    public bool IsPopupActive => currentState == GameplayState.Popup;
 
     private void OnEnable()
     {
@@ -118,16 +145,29 @@ public class GameManager : MonoBehaviour
     /// something trying to escape it, so it's treated as active-FeatureMode for this guard's
     /// purposes too (see IsFeatureModeGuardActive) rather than being blocked like the plain
     /// resolving states are.
+    ///
+    /// Popup is guarded the same way: while a popup is showing, nothing can change state out
+    /// from under it (see PopupManager) - only ExitPopup can leave. A popup can still interrupt
+    /// an active FeatureMode (e.g. an error dialog) - featureModeActive is tracked independently
+    /// of currentState specifically so ExitFeatureMode keeps working correctly even while a
+    /// popup is covering it (see ExitFeatureMode).
     /// </summary>
     public void SetState(GameplayState newState)
     {
         if (currentState == newState) return;
 
+        if (currentState == GameplayState.Popup)
+        {
+            Debug.LogWarning($"[GameManager] Ignored SetState({newState}) while a popup is active - " +
+                              "only ExitPopup can leave Popup.");
+            return;
+        }
+
         bool isFreeSpinInternalTransition =
             (currentState == GameplayState.FeatureMode && newState == GameplayState.ResolvingFreeSpin)
             || (currentState == GameplayState.ResolvingFreeSpin && newState == GameplayState.FeatureMode);
 
-        bool wouldEscapeFeatureMode = IsFeatureModeGuardActive(currentState)
+        bool wouldEscapeFeatureMode = featureModeActive
             && !isFreeSpinInternalTransition
             && IsInputRelatedState(newState);
 
@@ -142,12 +182,6 @@ public class GameManager : MonoBehaviour
         SetStateInternal(newState);
     }
 
-    /// <summary>True for FeatureMode itself and for ResolvingFreeSpin - both count as "the guard
-    /// above is active" since ResolvingFreeSpin is just Free Spins' own in-progress work, not a
-    /// state anything else should be able to interrupt out of either.</summary>
-    private static bool IsFeatureModeGuardActive(GameplayState state) =>
-        state == GameplayState.FeatureMode || state == GameplayState.ResolvingFreeSpin;
-
     /// <summary>Idle/GracePeriod re-enable input directly; the mid-cascade states are what a stray
     /// leftover coroutine would try to resume into on its way back to Idle.</summary>
     private static bool IsInputRelatedState(GameplayState state) =>
@@ -158,11 +192,14 @@ public class GameManager : MonoBehaviour
         || state == GameplayState.ResolvingSpecialMadness
         || state == GameplayState.ResolvingMadnessColorChange;
 
-    /// <summary>Bypasses the FeatureMode guard above - only Enter/ExitFeatureMode should call this directly.</summary>
+    /// <summary>Bypasses the FeatureMode/Popup guards above - only Enter/Exit methods for those
+    /// states, and this class's own event-driven transitions, should call this directly.</summary>
     private void SetStateInternal(GameplayState newState)
     {
+        var previous = currentState;
         currentState = newState;
         Debug.Log($"[GameManager] State -> {currentState}");
+        EventBus.Publish(new GameStateChangedEvent(previous, currentState));
     }
 
     /// <summary>
@@ -183,7 +220,7 @@ public class GameManager : MonoBehaviour
     /// </summary>
     public void EnterFeatureMode()
     {
-        if (currentState == GameplayState.FeatureMode) return;
+        if (featureModeActive) return;
 
         // Only Idle/GracePeriod are safe to restore into - both allow player input. If the
         // madness meter happens to fill mid-cascade (e.g. currentState is ResolvingMatches when
@@ -194,6 +231,7 @@ public class GameManager : MonoBehaviour
             ? currentState
             : GameplayState.Idle;
 
+        featureModeActive = true;
         SetStateInternal(GameplayState.FeatureMode);
     }
 
@@ -201,11 +239,59 @@ public class GameManager : MonoBehaviour
     /// Called by a feature-mode manager when its mini-game ends. Restores whatever state was
     /// active before EnterFeatureMode was called, unless an explicit returnState override is
     /// passed (e.g. force back to Idle regardless).
+    ///
+    /// If a popup is currently covering FeatureMode (currentState == Popup), we can't change
+    /// currentState out from under it - but we still mark FeatureMode as no-longer-active and
+    /// fix up what ExitPopup will restore into, so the popup closing doesn't wrongly resume a
+    /// mini-game that has actually already ended.
     /// </summary>
     public void ExitFeatureMode(GameplayState? returnState = null)
     {
-        if (!IsFeatureModeGuardActive(currentState)) return;
+        if (!featureModeActive) return;
+        featureModeActive = false;
+
+        if (currentState == GameplayState.Popup)
+        {
+            stateBeforePopup = returnState ?? stateBeforeFeatureMode;
+            return;
+        }
+
         SetStateInternal(returnState ?? stateBeforeFeatureMode);
+    }
+
+    /// <summary>
+    /// Called by PopupManager when a modal popup (tutorial step, powerup choice, confirmation
+    /// dialog, etc.) opens. Remembers the state we were in beforehand so ExitPopup can restore
+    /// it - same single-slot save/restore pattern as EnterFeatureMode/ExitFeatureMode. Also pushes
+    /// a slow-mo/pause request via TimeController, so anything still animating (a cascade
+    /// mid-drop, a highlight sweep) visibly slows/freezes along with gameplay rather than
+    /// silently continuing off-screen while the popup has focus.
+    /// </summary>
+    public void EnterPopup()
+    {
+        if (currentState == GameplayState.Popup) return;
+        stateBeforePopup = currentState;
+        popupTimeScaleHandle = TimeController.Push(popupTimeScale);
+        SetStateInternal(GameplayState.Popup);
+    }
+
+    /// <summary>
+    /// Called by PopupManager once the popup queue drains. Restores whatever was active before
+    /// EnterPopup, unless an explicit returnState override is passed, and releases this popup's
+    /// TimeController request (Time.timeScale returns to normal, or to whatever any OTHER still-
+    /// active request wants, if something else also has one pushed).
+    /// </summary>
+    public void ExitPopup(GameplayState? returnState = null)
+    {
+        if (currentState != GameplayState.Popup) return;
+
+        if (popupTimeScaleHandle != -1)
+        {
+            TimeController.Pop(popupTimeScaleHandle);
+            popupTimeScaleHandle = -1;
+        }
+
+        SetStateInternal(returnState ?? stateBeforePopup);
     }
 
     private void HandleScoreChanged(ScoreChangedEvent evt)

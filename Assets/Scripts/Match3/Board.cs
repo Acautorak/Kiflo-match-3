@@ -74,6 +74,12 @@ public class Board : MonoBehaviour
              "in case the chance above is set high enough to otherwise cascade indefinitely.")]
     [Min(0)]
     [SerializeField] private int maxConsecutiveRandomTriggers = 3;
+    [Tooltip("Hard cap on how many cascade steps a SINGLE move's cascade can run, regardless of " +
+             "whether matches are still being found - guarantees the player always gets control " +
+             "back even if something (e.g. a large same-colored patch from repeated color-convert " +
+             "effects) keeps making refills likely to immediately rematch. See MatchResolver.")]
+    [Min(1)]
+    [SerializeField] private int maxCascadeSteps = 50;
 
     [Header("Locking / Freezing")]
     [Tooltip("If true, breaking a lock's final layer also clears/destroys the tile immediately " +
@@ -234,7 +240,8 @@ public class Board : MonoBehaviour
             EligibleRandomSpecialTypes = eligibleRandomSpecialTypes,
             MaxConsecutiveRandomTriggers = maxConsecutiveRandomTriggers,
             RandomSpecialTriggerChance = randomSpecialTriggerChance,
-            EnableRandomSpecialOnGravity = enableRandomSpecialOnGravity
+            EnableRandomSpecialOnGravity = enableRandomSpecialOnGravity,
+            MaxCascadeSteps = maxCascadeSteps
         };
 
         freeSpinsController = new FreeSpinsController(grid, symbolSpawner, matchResolver, gameManager, this, fallDuration, GridToWorld,
@@ -488,6 +495,10 @@ public class Board : MonoBehaviour
     private Vector3 GridToWorld(int x, int y) =>
         new Vector3(origin.x + x * cellSize, origin.y + y * cellSize, 0f);
 
+    /// <summary>Public accessor for grid-to-world conversion (used by UI/VFX systems like
+    /// SpecialSymbolEventRelay's combo popup, which need it but sit outside Board itself).</summary>
+    public Vector3 GridToWorldPosition(int x, int y) => GridToWorld(x, y);
+
     #endregion
 
     #region Input / Swapping
@@ -544,6 +555,15 @@ public class Board : MonoBehaviour
         }
 
         madnessSystem.TickSurvival();
+
+        // TickSurvival can itself create new matches (e.g. an onSurvivedMoveEffect that repaints
+        // several cells to the same color via ConvertRandomSymbols/RandomizeSymbolColors) - unlike
+        // the swap's own matches or the lock-melt case above, nothing else would ever rescan for
+        // these, so they'd otherwise just sit there matched-but-undetected until the player
+        // happened to swap something adjacent to them.
+        var postSurvivalMatches = MatchFinder.FindMatchGroups(grid.RawGrid, width, height, madnessSystem.TreatMadnessSymbolsAsWildcards);
+        if (postSurvivalMatches.Count > 0)
+            yield return ResolveMatches(postSurvivalMatches);
 
         isBusy = false;
         RestoreGameManagerRestingState();

@@ -38,7 +38,8 @@ public class StageDefinition
 public enum MadnessFeatureModeChoice
 {
     KebabKarnage,
-    FreeSpins
+    FreeSpins,
+    LuckyScratchTicket
 }
 
 public enum StageGoalType

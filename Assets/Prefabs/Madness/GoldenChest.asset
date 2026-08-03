@@ -19,6 +19,7 @@ MonoBehaviour:
   immunityAmount: 7
   onSpawnedEffects:
   - {fileID: 11400000, guid: 16064733dc11d974391ba9de2b270934, type: 2}
+  - {fileID: 11400000, guid: 484e2ded62cc8cc4f801866e0f493cb6, type: 2}
   onSurvivedMoveEffects:
   - {fileID: 11400000, guid: 16064733dc11d974391ba9de2b270934, type: 2}
   onClearedEffects:

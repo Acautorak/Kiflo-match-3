@@ -34,6 +34,10 @@ public class MadnessFeatureTrigger : MonoBehaviour
 
     private bool _pendingRequest;
     private float _pendingOverflow;
+    /// <summary>Set by DebugForceFeature - if non-null, ResolveFeatureId uses this instead of the
+    /// current stage's featureModeOnMeterFull the next time a request fires, then clears itself.
+    /// Playtest-only escape hatch, see DebugFeatureModeMenu.</summary>
+    private string _debugForcedFeatureId;
 
     private void Awake()
     {
@@ -72,6 +76,27 @@ public class MadnessFeatureTrigger : MonoBehaviour
         if (_pendingRequest) TryFireIfSettled();
     }
 
+    /// <summary>
+    /// Playtest-only: forces the next feature-mode request to be featureId instead of whatever
+    /// the current stage's featureModeOnMeterFull would normally pick, bypassing the Madness
+    /// meter entirely so you don't have to grind matches to test a specific mode. Still goes
+    /// through the exact same "wait for the board to settle" path a real meter-fill uses (see
+    /// TryFireIfSettled), so it won't yank a feature mode in from under an in-flight cascade -
+    /// if you're mid-match when you press the debug button, it'll fire the instant that match
+    /// finishes resolving rather than immediately. Called by DebugFeatureModeMenu.
+    /// </summary>
+    public void DebugForceFeature(string featureId, float overflowAmount = 0f)
+    {
+        if (string.IsNullOrEmpty(featureId)) return;
+
+        _debugForcedFeatureId = featureId;
+        _pendingOverflow = Mathf.Max(0f, overflowAmount);
+        _pendingRequest = true;
+        Debug.Log($"[MadnessFeatureTrigger] DEBUG override armed - forcing '{featureId}' to fire once the board next settles.");
+
+        TryFireIfSettled();
+    }
+
     private void TryFireIfSettled()
     {
         if (!_pendingRequest) return;
@@ -89,16 +114,26 @@ public class MadnessFeatureTrigger : MonoBehaviour
     }
 
     /// <summary>Maps the current stage's designer-chosen MadnessFeatureModeChoice to the concrete
-    /// feature id string each manager listens for. Falls back to featureIdOnFill if there's no
+    /// feature id string each manager listens for. A debug override (see DebugForceFeature) wins
+    /// if one is armed, and is consumed (cleared) the instant it's read so it only affects the
+    /// single request it was set for. Falls back to featureIdOnFill if there's no
     /// StageManager/CurrentStage (e.g. Board running standalone).</summary>
     private string ResolveFeatureId()
     {
+        if (_debugForcedFeatureId != null)
+        {
+            string forced = _debugForcedFeatureId;
+            _debugForcedFeatureId = null;
+            return forced;
+        }
+
         var stage = stageManager != null ? stageManager.CurrentStage : null;
         if (stage == null) return featureIdOnFill;
 
         return stage.featureModeOnMeterFull switch
         {
             MadnessFeatureModeChoice.FreeSpins => FreeSpinsManager.FeatureId,
+            MadnessFeatureModeChoice.LuckyScratchTicket => LuckyScratchTicketManager.FeatureId,
             _ => KebabKarnageManager.FeatureId,
         };
     }

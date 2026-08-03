@@ -45,6 +45,17 @@ public class MatchResolver
     public float RandomSpecialTriggerChance { get; set; } = 0.05f;
     public bool EnableRandomSpecialOnGravity { get; set; } = false;
 
+    /// <summary>
+    /// Hard safety cap on how many cascade steps a single Resolve() call can run, regardless of
+    /// whether each step is making "real" progress (see anyProgressThisStep below - this is a
+    /// different failure mode). A large same-colored patch from a color-convert effect can make
+    /// every gravity refill fairly likely to immediately rematch it, clear, refill, and roll
+    /// again - each step genuinely destroys something, so nothing else here catches it, and it
+    /// can chain for a very long time (technically finite, practically indistinguishable from
+    /// stuck) before randomly running dry. This guarantees the player always gets control back.
+    /// </summary>
+    public int MaxCascadeSteps { get; set; } = 50;
+
     public MatchResolver(GridModel grid, GravityController gravityController, SpecialEffectSystem specialEffectSystem,
         MadnessSystem madnessSystem, LockingSystem lockingSystem, ScoreTracker scoreTracker, SymbolSpawner symbolSpawner,
         PlayerHealth playerHealth, PlayerRunStats playerRunStats, MadnessBoardModifiers madnessBoardModifiers,
@@ -145,17 +156,37 @@ public class MatchResolver
             // still locked - in that case they take a hit too, and special creation there is
             // deferred (removed from specialsToCreate) until a future pass finds it unlocked.
             int scoreDelta = 0;
+            bool anyProgressThisStep = false;
             foreach (var pos in allPositions)
             {
                 bool isSpecialSeed = specialsToCreate.ContainsKey(pos);
                 var occBefore = grid[pos.x, pos.y].Occupant;
-                if (isSpecialSeed && (occBefore == null || !occBefore.IsLocked)) continue;
+                // A seed cell that's locked OR an immune Madness Symbol doesn't get replaced by
+                // the new special this pass - it goes through ClearCell like anything else (takes
+                // a lock hit / absorbs the immunity hit without dying), and only becomes eligible
+                // to turn into the special on some future pass once it's actually clear.
+                bool seedIsProtected = occBefore != null &&
+                    (occBefore.IsLocked || (occBefore.IsMadness && occBefore.IsMadnessImmune));
+                if (isSpecialSeed && (occBefore == null || !seedIsProtected)) continue;
+
+                // A locked cell always makes real progress even when not destroyed - RemoveLockLayer()
+                // unconditionally removes one layer on every hit, so it's finite and guaranteed to
+                // eventually fully unlock. An immune Madness Symbol is NOT guaranteed progress: Moves-
+                // mode immunity only ticks down via MadnessSystem.TickSurvival on a real player move
+                // (see ClearCell), which never happens mid-cascade - so a group made entirely of
+                // Moves-mode-immune cells would otherwise re-match this exact same set of cells every
+                // single rescan below, forever. wasLocked captures the one case that's always safe to
+                // treat as progress even without a destruction this pass.
+                bool wasLocked = occBefore != null && occBefore.IsLocked;
 
                 var (destroyed, delta) = ClearCell(pos, chainCount);
                 scoreDelta += delta;
+                if (destroyed || wasLocked) anyProgressThisStep = true;
                 if (isSpecialSeed && !destroyed) specialsToCreate.Remove(pos);
             }
             scoreTracker.AddScore(scoreDelta);
+
+            if (specialsToCreate.Count > 0) anyProgressThisStep = true; // a newly-spawned special is a real board change too
 
             foreach (var (pos, info) in specialsToCreate)
             {
@@ -166,6 +197,16 @@ public class MatchResolver
             }
 
             if (isStageClearing()) break;
+
+            if (!anyProgressThisStep)
+            {
+                Debug.LogWarning($"[MatchResolver] Cascade step {chainCount} destroyed nothing and unlocked nothing " +
+                                  "(every matched cell was an immune Madness Symbol with no lock to reduce - likely " +
+                                  "Moves-mode immunity, which only ticks on a real player move, never mid-cascade). " +
+                                  "Stopping the cascade here instead of re-matching the identical cells forever - " +
+                                  "the player's next move will tick immunity normally via MadnessSystem.TickSurvival.");
+                break;
+            }
 
             if (shouldSkipRefillGeneration())
             {
@@ -178,6 +219,17 @@ public class MatchResolver
             yield return TryRandomSpecialOnGravity(chainCount);
             gameManager?.SetState(GameManager.GameplayState.ResolvingMatches);
             currentGroups = MatchFinder.FindMatchGroups(grid.RawGrid, grid.Width, grid.Height, madnessSystem.TreatMadnessSymbolsAsWildcards);
+
+            if (currentGroups.Count > 0 && chainCount >= MaxCascadeSteps)
+            {
+                Debug.LogWarning($"[MatchResolver] Hit MaxCascadeSteps ({MaxCascadeSteps}) after step {chainCount} " +
+                                  "fully resolved - the board still has matches, but stopping here rather than " +
+                                  "continuing to cascade. Likely a same-colored patch making refills keep rematching " +
+                                  "by chance; worth checking whatever's been repeatedly repainting toward one color. " +
+                                  "Whatever's left unresolved will simply get picked up and re-attempted on the " +
+                                  "player's next move, same as any other pre-existing board match would be.");
+                currentGroups = new List<MatchGroup>();
+            }
         }
     }
 
@@ -247,9 +299,13 @@ public class MatchResolver
         // via MadnessSystem.TickSurvival once per move, regardless of being matched).
         if (occ.IsMadness && occ.IsMadnessImmune)
         {
+            Debug.Log($"[MatchResolver] ClearCell({pos}): Madness symbol immune (mode={occ.ImmunityMode}, remaining={occ.ImmunityRemaining}) - hit absorbed, not destroyed.");
             occ.TickMadnessImmunityMatch();
             return (false, 0);
         }
+
+        if (occ.IsMadness)
+            Debug.Log($"[MatchResolver] ClearCell({pos}): Madness symbol NOT immune (mode={occ.ImmunityMode}, remaining={occ.ImmunityRemaining}) - destroying.");
 
         var color = occ.Type;
 

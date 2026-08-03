@@ -1,0 +1,19 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: f974293c1d26e2942bc0915148f661cb, type: 3}
+  m_Name: Scratch Reward Pool
+  m_EditorClassIdentifier: Assembly-CSharp::LuckyScratchRewardPoolConfig
+  rewards:
+  - {fileID: 11400000, guid: 25fc99da23bc3ce4e88a31707febf6c3, type: 2}
+  - {fileID: 11400000, guid: f20dc917bdb85ec4db53f875c67058e0, type: 2}
+  - {fileID: 11400000, guid: 4ac2804579117434cbf0bb8643780a0f, type: 2}
+  - {fileID: 11400000, guid: fb6b237910c638142815f32ef8af3934, type: 2}

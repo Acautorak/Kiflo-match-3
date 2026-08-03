@@ -96,6 +96,7 @@ public class StageGenerationConfig : ScriptableObject
     {
         new FeatureModeWeight { mode = MadnessFeatureModeChoice.KebabKarnage, weight = 1f },
         new FeatureModeWeight { mode = MadnessFeatureModeChoice.FreeSpins, weight = 1f },
+        new FeatureModeWeight { mode = MadnessFeatureModeChoice.LuckyScratchTicket, weight = 1f },
     };
 
     [Header("Rules (fixed - not scaled by difficulty)")]

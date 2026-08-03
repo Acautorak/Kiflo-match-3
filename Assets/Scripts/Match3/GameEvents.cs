@@ -113,6 +113,17 @@ public readonly struct StageStartedEvent
     }
 }
 
+public readonly struct GameStateChangedEvent
+{
+    public readonly GameManager.GameplayState Previous;
+    public readonly GameManager.GameplayState Current;
+    public GameStateChangedEvent(GameManager.GameplayState previous, GameManager.GameplayState current)
+    {
+        Previous = previous;
+        Current = current;
+    }
+}
+
 /// <summary>
 /// Fired every time a lock loses a layer - either from being caught in a match/special
 /// clear (TriggeredByMatch=true) or from the automatic per-move melt on Temporary locks
@@ -237,5 +248,23 @@ public readonly struct SymbolsRandomizedEvent
     {
         Positions = positions;
         NewColors = newColors;
+    }
+}
+
+/// <summary>
+/// Fired when a Madness Symbol is created on the board via refill spawn (see
+/// GravityController.Collapse). Distinct from MadnessSymbolClearedEvent - this is the "it just
+/// appeared" moment, useful for tutorials/VFX that want to react the first time a particular
+/// MadnessSymbolDefinition shows up in a run.
+/// </summary>
+public readonly struct MadnessSymbolSpawnedEvent
+{
+    public readonly MadnessSymbolDefinition Definition;
+    public readonly Vector2Int Position;
+ 
+    public MadnessSymbolSpawnedEvent(MadnessSymbolDefinition definition, Vector2Int position)
+    {
+        Definition = definition;
+        Position = position;
     }
 }

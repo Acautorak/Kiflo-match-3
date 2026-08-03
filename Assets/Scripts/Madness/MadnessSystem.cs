@@ -114,7 +114,7 @@ public class MadnessSystem
 
         for (int i = 0; i < count && candidates.Count > 0; i++)
         {
-            int index = Random.Range(0, candidates.Count);
+            int index = PickIndexAvoidingMatch(candidates, toColor);
             var pos = candidates[index];
             candidates.RemoveAt(index);
 
@@ -163,11 +163,10 @@ public class MadnessSystem
 
             var occ = grid[pos.x, pos.y].Occupant;
             var newColor = spawner.RandomType();
-            if (guaranteeColorChange)
-            {
-                int guard = 0;
-                while (newColor == occ.Type && guard++ < 8) newColor = spawner.RandomType();
-            }
+            int guard = 0;
+            while (guard++ < 8 &&
+                   ((guaranteeColorChange && newColor == occ.Type) || WouldCreateMatch(pos.x, pos.y, newColor)))
+                newColor = spawner.RandomType();
 
             occ.SetType(newColor);
             affected.Add(pos);
@@ -226,5 +225,58 @@ public class MadnessSystem
             if (roll <= cumulative) return o.definition;
         }
         return MadnessSpawnOptions[MadnessSpawnOptions.Length - 1]?.definition;
+    }
+
+    /// <summary>
+    /// True if setting (x,y) to `type` would immediately complete a 3+ run in any direction,
+    /// given what's already on the grid right now. Used by ConvertRandomSymbols and
+    /// RandomizeSymbolColors to keep those effects genuine repaints - matching
+    /// MadnessColorConvertEffect's own doc comment ("no clear, no score - just a color change") -
+    /// rather than silently seeding matches that, over many repeated triggers, can snowball into
+    /// a large same-colored patch that keeps rematching every time gravity refills near it (see
+    /// MatchResolver.MaxCascadeSteps, which exists as a safety net for exactly that scenario).
+    /// Checks all four directions (unlike SymbolSpawner.CreatesImmediateMatch, which only needs
+    /// up/left since it runs during left-to-right/top-to-bottom initial population) since a
+    /// repaint has real neighbors already placed on every side.
+    /// </summary>
+    private bool WouldCreateMatch(int x, int y, SymbolType type)
+    {
+        return CountSameTypeRun(x, y, type, 1, 0) + CountSameTypeRun(x, y, type, -1, 0) >= 2
+            || CountSameTypeRun(x, y, type, 0, 1) + CountSameTypeRun(x, y, type, 0, -1) >= 2;
+    }
+
+    private int CountSameTypeRun(int x, int y, SymbolType type, int dx, int dy)
+    {
+        int count = 0;
+        int cx = x + dx, cy = y + dy;
+        while (cx >= 0 && cx < grid.Width && cy >= 0 && cy < grid.Height)
+        {
+            var occ = grid[cx, cy].Occupant;
+            if (occ == null || occ.Type != type) break;
+            count++;
+            cx += dx;
+            cy += dy;
+        }
+        return count;
+    }
+
+    /// <summary>
+    /// Picks a candidate index that WOULDN'T immediately complete a match if set to `type`,
+    /// checked freshly against the board as it stands right now (so earlier conversions within
+    /// the same ConvertRandomSymbols call are already accounted for). Starts scanning from a
+    /// random offset so which safe cell "wins" among several still varies call to call, rather
+    /// than always favoring low indices. Falls back to a plain random pick if every remaining
+    /// candidate would create a match - rare, and better than silently converting fewer cells
+    /// than requested.
+    /// </summary>
+    private int PickIndexAvoidingMatch(List<Vector2Int> candidates, SymbolType type)
+    {
+        int start = Random.Range(0, candidates.Count);
+        for (int i = 0; i < candidates.Count; i++)
+        {
+            int index = (start + i) % candidates.Count;
+            if (!WouldCreateMatch(candidates[index].x, candidates[index].y, type)) return index;
+        }
+        return Random.Range(0, candidates.Count);
     }
 }

@@ -88,6 +88,8 @@ public class GravityController
                     {
                         instance.InitializeMadness(madnessDef);
                         madnessSystem.FireEffects(madnessDef.onSpawnedEffects, instance, new Vector2Int(x, y), chainCount: 0);
+                        Debug.Log($"[GravityController] Madness Symbol spawned: '{madnessDef.name}' at ({x},{y})");
+                        EventBus.Publish(new MadnessSymbolSpawnedEvent(madnessDef, new Vector2Int(x, y)));
                     }
                 }
 

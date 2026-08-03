@@ -15,10 +15,11 @@ MonoBehaviour:
   title: Color COnvert
   description: Kebab
   icon: {fileID: 21300000, guid: 4343ec9294c9eea4fa1d35f6978fea78, type: 3}
-  immunityMode: 1
-  immunityAmount: 1
+  immunityMode: 2
+  immunityAmount: 5
   onSpawnedEffects:
   - {fileID: 11400000, guid: 997aefdb35644844795b4a305bcb91c5, type: 2}
+  - {fileID: 11400000, guid: 484e2ded62cc8cc4f801866e0f493cb6, type: 2}
   onSurvivedMoveEffects:
   - {fileID: 11400000, guid: 997aefdb35644844795b4a305bcb91c5, type: 2}
   onClearedEffects:
