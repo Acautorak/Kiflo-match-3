@@ -19,4 +19,4 @@ MonoBehaviour:
   triggerMadnessSymbol: {fileID: 11400000, guid: b763b2e55a431e94c90c87c78ca9760d, type: 2}
   title: Damage Kebab
   body: Deals damage to you when matched
-  showOnce: 0
+  showOnce: 1

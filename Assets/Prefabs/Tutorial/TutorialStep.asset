@@ -13,8 +13,10 @@ MonoBehaviour:
   m_Name: TutorialStep
   m_EditorClassIdentifier: Assembly-CSharp::TutorialStepDefinition
   id: 
+  triggerType: 0
   triggerState: 8
   onlyOnStageIndex: -1
+  triggerMadnessSymbol: {fileID: 0}
   title: Grace Move
   body: Make a Grace Move
-  showOnce: 0
+  showOnce: 1

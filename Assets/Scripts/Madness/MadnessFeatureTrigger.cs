@@ -20,6 +20,20 @@ using UnityEngine;
 /// StageGenerationConfig.featureModeWeights) - read here off StageManager.CurrentStage.
 /// featureIdOnFill is kept only as the fallback used when no StageManager/CurrentStage is
 /// available (e.g. Board running standalone without a StageManager in the scene).
+///
+/// Two additional pacing controls live here too:
+/// - featuresBlockedDuringGracePeriod: specific features can be locked out of firing while a
+///   stage's clear-out grace period is active (StageManager.IsStageClearPending) - they simply
+///   wait for the board to be back at a genuine mid-stage Idle instead.
+/// - guaranteedFallbackMoves: if the Madness meter hasn't organically filled within this many
+///   player moves, a feature fires anyway, so pacing doesn't depend entirely on how much scoring/
+///   combo activity a given stretch of play happens to produce. This counter deliberately pauses
+///   during a stage's grace period so it can't force a feature right as a stage is wrapping up.
+///
+/// One more block applies unconditionally to every feature, not configurable: while
+/// StageManager.IsAwaitingPowerupSelection is true (the post-clear powerup-choice screen), no
+/// feature mode can fire - it stays pending until the player has picked and the next stage has
+/// actually started.
 /// </summary>
 public class MadnessFeatureTrigger : MonoBehaviour
 {
@@ -29,14 +43,37 @@ public class MadnessFeatureTrigger : MonoBehaviour
              "stage's featureModeOnMeterFull choice.")]
     [SerializeField] private StageManager stageManager;
 
-    [Tooltip("Fallback feature mode id used only when no StageManager/CurrentStage is available. Defaults to Kebab Karnage.")]
-    [SerializeField] private string featureIdOnFill = KebabKarnageManager.FeatureId;
+    [Tooltip("Fallback feature mode used only when no StageManager/CurrentStage is available (e.g. " +
+             "Board running standalone without a StageManager in the scene). Defaults to Kebab Karnage.")]
+    [SerializeField] private MadnessFeatureModeChoice featureModeOnFillFallback = MadnessFeatureModeChoice.KebabKarnage;
+
+    [Header("Grace Period Locking")]
+    [Tooltip("Feature modes that must NOT fire while a stage-clear grace period is active (goal " +
+             "already reached, player is spending their bonus grace moves before the stage fully " +
+             "clears - see StageManager.IsStageClearPending). A blocked feature just keeps waiting " +
+             "instead of firing - it goes off as soon as the board is back to a real mid-stage Idle " +
+             "on the next stage. Leave empty to allow every feature during grace period, same as " +
+             "before. Pick straight from this dropdown - no manual id-string typing needed.")]
+    [SerializeField] private System.Collections.Generic.List<MadnessFeatureModeChoice> featuresBlockedDuringGracePeriod
+        = new System.Collections.Generic.List<MadnessFeatureModeChoice>();
+
+    [Header("Guaranteed Fallback")]
+    [Tooltip("If > 0, and no feature has organically triggered (via the Madness meter filling) " +
+             "within this many player moves, one gets forced anyway - keeps pacing consistent even " +
+             "through an unlucky/quiet stretch instead of leaving it purely up to the meter. Move " +
+             "counting pauses while a stage-clear grace period is active (see IsStageClearPending) " +
+             "so the fallback can't fire right as a stage ends - only during genuine mid-stage play. " +
+             "0 = disabled, purely meter-driven like before.")]
+    [Min(0)]
+    [SerializeField] private int guaranteedFallbackMoves = 40;
+
+    private int _movesSinceLastFeature;
 
     private bool _pendingRequest;
     private float _pendingOverflow;
-    /// <summary>Set by DebugForceFeature - if non-null, ResolveFeatureId uses this instead of the
-    /// current stage's featureModeOnMeterFull the next time a request fires, then clears itself.
-    /// Playtest-only escape hatch, see DebugFeatureModeMenu.</summary>
+    /// <summary>Set by DebugForceFeature - if non-null, PeekFeatureId returns this instead of the
+    /// current stage's featureModeOnMeterFull, consumed (cleared) only once a request actually
+    /// fires. Playtest-only escape hatch, see DebugFeatureModeMenu.</summary>
     private string _debugForcedFeatureId;
 
     private void Awake()
@@ -49,9 +86,35 @@ public class MadnessFeatureTrigger : MonoBehaviour
     {
         EventBus.Unsubscribe<MadnessMeterChangedEvent>(HandleMeterChanged);
         EventBus.Subscribe<MadnessMeterChangedEvent>(HandleMeterChanged);
+        EventBus.Unsubscribe<PlayerMoveEvent>(HandlePlayerMove);
+        EventBus.Subscribe<PlayerMoveEvent>(HandlePlayerMove);
     }
 
-    private void OnDisable() => EventBus.Unsubscribe<MadnessMeterChangedEvent>(HandleMeterChanged);
+    private void OnDisable()
+    {
+        EventBus.Unsubscribe<MadnessMeterChangedEvent>(HandleMeterChanged);
+        EventBus.Unsubscribe<PlayerMoveEvent>(HandlePlayerMove);
+    }
+
+    /// <summary>Counts real mid-stage moves toward the guaranteed fallback (see
+    /// guaranteedFallbackMoves) - deliberately does NOT count (or arm) while a stage-clear grace
+    /// period or a powerup-selection screen is active, so a quiet stretch that happens to land
+    /// right at either of those can't force a feature mode in. The counter simply resumes once
+    /// real play picks back up.</summary>
+    private void HandlePlayerMove(PlayerMoveEvent evt)
+    {
+        if (guaranteedFallbackMoves <= 0) return;
+        if (_pendingRequest) return; // a request (organic or fallback) is already in flight
+        if (stageManager != null && (stageManager.IsStageClearPending || stageManager.IsAwaitingPowerupSelection)) return;
+
+        _movesSinceLastFeature++;
+        if (_movesSinceLastFeature < guaranteedFallbackMoves) return;
+
+        Debug.Log($"[MadnessFeatureTrigger] Guaranteed fallback hit ({_movesSinceLastFeature} moves since the last feature) - arming a trigger.");
+        _pendingOverflow = 0f;
+        _pendingRequest = true;
+        TryFireIfSettled();
+    }
 
     private void HandleMeterChanged(MadnessMeterChangedEvent evt)
     {
@@ -105,36 +168,80 @@ public class MadnessFeatureTrigger : MonoBehaviour
             || gameManager.CurrentState == GameManager.GameplayState.Idle
             || gameManager.CurrentState == GameManager.GameplayState.GracePeriod;
 
+        // Awaiting a powerup pick is its own hard block, regardless of feature - starting a
+        // mini-game while that choice UI is up would either fight it for input or get hidden
+        // behind it, and unlike the grace-period list this isn't something any single feature
+        // should be allowed to opt into.
+        if (stageManager != null && stageManager.IsAwaitingPowerupSelection)
+            settled = false;
+
         if (!settled) return;
 
+        MadnessFeatureModeChoice? choice = PeekFeatureChoice();
+
+        bool inGracePeriod = gameManager != null && gameManager.CurrentState == GameManager.GameplayState.GracePeriod;
+        if (inGracePeriod && choice.HasValue && featuresBlockedDuringGracePeriod.Contains(choice.Value))
+        {
+            // Stay pending - Update() keeps polling every frame, so this fires the instant the
+            // state moves on from GracePeriod (either the next real Idle mid-stage, or after the
+            // upcoming stage starts), without needing any extra bookkeeping here.
+            return;
+        }
+
+        string featureId = PeekFeatureId();
         _pendingRequest = false;
-        string featureId = ResolveFeatureId();
+        _debugForcedFeatureId = null; // consumed now that a request is actually firing
+        _movesSinceLastFeature = 0;
         Debug.Log($"[MadnessFeatureTrigger] Board settled - requesting feature mode '{featureId}' (overflow {_pendingOverflow:0.##}).");
         EventBus.Publish(new FeatureModeRequestedEvent(featureId, _pendingOverflow));
     }
 
-    /// <summary>Maps the current stage's designer-chosen MadnessFeatureModeChoice to the concrete
-    /// feature id string each manager listens for. A debug override (see DebugForceFeature) wins
-    /// if one is armed, and is consumed (cleared) the instant it's read so it only affects the
-    /// single request it was set for. Falls back to featureIdOnFill if there's no
-    /// StageManager/CurrentStage (e.g. Board running standalone).</summary>
-    private string ResolveFeatureId()
+    /// <summary>Same resolution as PeekFeatureId, but returns the MadnessFeatureModeChoice enum
+    /// value instead of a concrete feature id string - what featuresBlockedDuringGracePeriod
+    /// actually compares against. A debug-forced string that doesn't match any known manager's
+    /// FeatureId (e.g. a typo, or a custom feature not in the enum) returns null, which simply
+    /// can't match anything in the block list - a debug override always still fires, it just
+    /// can't be grace-period-blocked unless it maps back to a real choice.</summary>
+    private MadnessFeatureModeChoice? PeekFeatureChoice()
     {
-        if (_debugForcedFeatureId != null)
-        {
-            string forced = _debugForcedFeatureId;
-            _debugForcedFeatureId = null;
-            return forced;
-        }
+        if (_debugForcedFeatureId != null) return FeatureIdToChoice(_debugForcedFeatureId);
 
         var stage = stageManager != null ? stageManager.CurrentStage : null;
-        if (stage == null) return featureIdOnFill;
+        return stage?.featureModeOnMeterFull;
+    }
 
-        return stage.featureModeOnMeterFull switch
-        {
-            MadnessFeatureModeChoice.FreeSpins => FreeSpinsManager.FeatureId,
-            MadnessFeatureModeChoice.LuckyScratchTicket => LuckyScratchTicketManager.FeatureId,
-            _ => KebabKarnageManager.FeatureId,
-        };
+    private static MadnessFeatureModeChoice? FeatureIdToChoice(string featureId)
+    {
+        if (featureId == FreeSpinsManager.FeatureId) return MadnessFeatureModeChoice.FreeSpins;
+        if (featureId == LuckyScratchTicketManager.FeatureId) return MadnessFeatureModeChoice.LuckyScratchTicket;
+        if (featureId == KebabKarnageManager.FeatureId) return MadnessFeatureModeChoice.KebabKarnage;
+        return null;
+    }
+
+    /// <summary>The single source of truth mapping a MadnessFeatureModeChoice to the concrete
+    /// feature id string each manager listens for - used both to resolve the current stage's
+    /// choice and the standalone-mode fallback, so there's only one place to update if a new
+    /// feature mode is ever added.</summary>
+    private static string FeatureIdFor(MadnessFeatureModeChoice choice) => choice switch
+    {
+        MadnessFeatureModeChoice.FreeSpins => FreeSpinsManager.FeatureId,
+        MadnessFeatureModeChoice.LuckyScratchTicket => LuckyScratchTicketManager.FeatureId,
+        _ => KebabKarnageManager.FeatureId,
+    };
+
+    /// <summary>Maps the current stage's designer-chosen MadnessFeatureModeChoice to the concrete
+    /// feature id string each manager listens for. A debug override (see DebugForceFeature) wins
+    /// if one is armed. Side-effect-free (doesn't consume the debug override) so TryFireIfSettled
+    /// can safely peek at it while deciding whether a grace-period block applies, without
+    /// accidentally discarding the override on a check that ends up NOT firing. Falls back to
+    /// featureModeOnFillFallback if there's no StageManager/CurrentStage (e.g. Board running
+    /// standalone).</summary>
+    private string PeekFeatureId()
+    {
+        if (_debugForcedFeatureId != null) return _debugForcedFeatureId;
+
+        var stage = stageManager != null ? stageManager.CurrentStage : null;
+        var choice = stage?.featureModeOnMeterFull ?? featureModeOnFillFallback;
+        return FeatureIdFor(choice);
     }
 }

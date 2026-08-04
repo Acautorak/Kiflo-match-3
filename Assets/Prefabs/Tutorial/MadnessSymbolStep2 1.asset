@@ -19,4 +19,4 @@ MonoBehaviour:
   triggerMadnessSymbol: {fileID: 11400000, guid: dba6bc74f8e34bc48ac1327a6f5e55fa, type: 2}
   title: Choco treasute
   body: Needs 7 dmg to destroy and increases value each move
-  showOnce: 0
+  showOnce: 1

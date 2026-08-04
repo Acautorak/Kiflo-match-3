@@ -17,6 +17,10 @@ using UnityEngine.Events;
 /// Damage reward drops the player's HP to 0 mid-ticket - see HandlePanelRevealed. An optional
 /// timeout auto-reveals whatever's left so nobody gets stuck staring at an unfinished ticket.
 ///
+/// The player can also cash out early once earlyExitUnlockFraction of panels are scratched (see
+/// OnEarlyExitUnlocked / ExitEarly) - this locks in only what's already been revealed and skips
+/// every remaining panel entirely, dodging both further upgrades and further damage.
+///
 /// Start this by publishing EventBus.Publish(new FeatureModeRequestedEvent(LuckyScratchTicketManager.FeatureId))
 /// from wherever your madness-meter threshold logic lives, or just call StartFeatureMode() /
 /// Instance.StartFeatureMode() directly - identical trigger contract to KebabKarnageManager.
@@ -63,6 +67,21 @@ public class LuckyScratchTicketManager : MonoBehaviour
     [Min(0f)]
     [SerializeField] private float autoRevealTimeout = 25f;
 
+    [Header("Early Exit")]
+    [Tooltip("Once at least this fraction of panels have been scratched, the player can choose to " +
+             "bail out and move on to the next stage instead of finishing the ticket - locking in " +
+             "only what they've already revealed and skipping every remaining panel's reward " +
+             "(dodging both further upgrades AND further damage). 0 = available immediately; " +
+             "1 = never available (effectively disables early exit).")]
+    [Range(0f, 1f)]
+    [SerializeField] private float earlyExitUnlockFraction = 0.5f;
+    [Tooltip("Invoked once, the moment enough panels have been scratched to unlock early exit - " +
+             "show your 'Continue to Next Stage' button here. See OnEarlyExitUsed to hide it again.")]
+    public UnityEvent OnEarlyExitUnlocked;
+    /// <summary>Invoked right as an early exit is taken (before the wind-down delay) - hide the
+    /// exit button here, same as OnEarlyExitUnlocked shows it.</summary>
+    public UnityEvent OnEarlyExitUsed;
+
     [Header("Wind-Down")]
     [Tooltip("Extra delay after the outcome is decided (last panel scratched, or a Damage panel " +
              "drops HP to 0) before the mode actually exits - gives the final panel's own pop " +
@@ -85,10 +104,14 @@ public class LuckyScratchTicketManager : MonoBehaviour
 
     public bool IsActive { get; private set; }
     public int PanelsRevealed { get; private set; }
+    /// <summary>True once enough panels have been scratched (see earlyExitUnlockFraction) and the
+    /// mode hasn't already started ending some other way.</summary>
+    public bool CanExitEarly => IsActive && !isEnding && earlyExitUnlocked;
 
     private Coroutine timeoutRoutine;
     private Coroutine endingRoutine;
     private bool isEnding;
+    private bool earlyExitUnlocked;
     private int ticketPlayCount;
 
     private void Awake()
@@ -134,6 +157,7 @@ public class LuckyScratchTicketManager : MonoBehaviour
         if (IsActive) return;
         IsActive = true;
         isEnding = false;
+        earlyExitUnlocked = false;
         endingRoutine = null;
         PanelsRevealed = 0;
         ticketPlayCount++;
@@ -270,7 +294,30 @@ public class LuckyScratchTicketManager : MonoBehaviour
         }
 
         if (PanelsRevealed >= panels.Length)
+        {
             BeginEnding(survived: true);
+            return;
+        }
+
+        if (!earlyExitUnlocked && panels.Length > 0 && PanelsRevealed / (float)panels.Length >= earlyExitUnlockFraction)
+        {
+            earlyExitUnlocked = true;
+            Debug.Log($"[LuckyScratchTicketManager] Early exit unlocked at {PanelsRevealed}/{panels.Length} panels scratched.");
+            OnEarlyExitUnlocked?.Invoke();
+        }
+    }
+
+    /// <summary>Wire a "Continue to Next Stage" button's onClick to this once CanExitEarly is
+    /// true (see OnEarlyExitUnlocked). Locks in the outcome as a win using only what's already
+    /// been revealed - every remaining panel is simply never scratched, so neither its reward NOR
+    /// its potential Damage ever applies. Reuses the same wind-down path as a normal finish, so
+    /// OnTicketWindDown/OnModeWon still fire as usual.</summary>
+    public void ExitEarly()
+    {
+        if (!CanExitEarly) return;
+
+        Debug.Log($"[LuckyScratchTicketManager] Player exited early after {PanelsRevealed}/{panels.Length} panels - skipping the rest.");
+        BeginEnding(survived: true);
     }
 
     /// <summary>Locks in the outcome immediately (no more reveals get processed - see the
@@ -278,11 +325,15 @@ public class LuckyScratchTicketManager : MonoBehaviour
     /// ticket-wide animation can start right away, then waits windDownDelay before the mode
     /// actually tears down via EndFeatureMode. This is what gives the final panel's pop tween
     /// (and anything else hooked to the wind-down) room to play instead of the board snapping
-    /// back the instant the last reveal lands.</summary>
+    /// back the instant the last reveal lands. Also fires OnEarlyExitUsed defensively if the exit
+    /// button happened to still be visible (e.g. a death or the timeout landed the same frame it
+    /// unlocked) so the UI always ends up hiding it, not just on the ExitEarly() path.</summary>
     private void BeginEnding(bool survived)
     {
         if (isEnding) return;
         isEnding = true;
+
+        if (earlyExitUnlocked) OnEarlyExitUsed?.Invoke();
 
         if (timeoutRoutine != null) StopCoroutine(timeoutRoutine);
 

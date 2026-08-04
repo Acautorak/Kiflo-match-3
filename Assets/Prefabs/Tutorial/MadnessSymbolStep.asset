@@ -19,4 +19,4 @@ MonoBehaviour:
   triggerMadnessSymbol: {fileID: 11400000, guid: aaf4a03a8d499f249af013bc07dae946, type: 2}
   title: Color convert Kebab
   body: This Symbol changes random tiles every move you make
-  showOnce: 0
+  showOnce: 1
