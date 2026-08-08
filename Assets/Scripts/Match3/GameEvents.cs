@@ -40,18 +40,29 @@ public readonly struct SpecialSymbolCreatedEvent
     }
 }
 
-/// <summary>Fired when a special symbol is triggered/consumed as part of a match.</summary>
+/// <summary>Fired when a special symbol is triggered/consumed as part of a match - either a real
+/// pre-existing special caught in a match, or a spontaneous "Wonky" proc (MatchResolver.
+/// TryRandomSpecialOnGravity/TryRandomSpecialOnGraceMove rolling a random tile into a special
+/// effect outside of any real match, gated by RandomSpecialTriggerChance/
+/// MaxConsecutiveRandomTriggers/graceRandomSpecialChance) - see IsWonkyProc.</summary>
 public readonly struct SpecialSymbolMatchedEvent
 {
     public readonly SpecialType Special;
     public readonly Vector2Int Position;
     public readonly Vector2Int[] AffectedCells;
+    /// <summary>True if this came from a spontaneous random-gravity/grace-period proc rather than
+    /// a real special symbol getting caught in an actual match - lets SpecialSymbolEventRelay (or
+    /// any other listener) show a distinct "WONKY!"-style callout instead of the normal special-
+    /// match VFX/SFX. Defaults false so every pre-existing publish site (a genuine special match)
+    /// is unaffected without needing to be touched.</summary>
+    public readonly bool IsWonkyProc;
 
-    public SpecialSymbolMatchedEvent(SpecialType special, Vector2Int position, Vector2Int[] affectedCells)
+    public SpecialSymbolMatchedEvent(SpecialType special, Vector2Int position, Vector2Int[] affectedCells, bool isWonkyProc = false)
     {
         Special = special;
         Position = position;
         AffectedCells = affectedCells;
+        IsWonkyProc = isWonkyProc;
     }
 }
 
@@ -85,11 +96,38 @@ public readonly struct GameOverEvent
     public GameOverEvent(int finalScore) => FinalScore = finalScore;
 }
 
+/// <summary>Fired on every accepted player move (Board.RegisterPlayerMove) - MoveCount is the
+/// running total for the whole board's lifetime since the last stage start.</summary>
 public readonly struct PlayerMoveEvent
 {
     public readonly int MoveCount;
-    public PlayerMoveEvent(int moveCount) => MoveCount = moveCount;
+    /// <summary>True if this move was consumed from an armed Grace Move (see
+    /// GraceMoveController) - StageManager deliberately does NOT count a Grace Move toward a
+    /// MoveCount-type stage goal (it keeps its own separate counter for that specifically
+    /// because of this flag), even though MoveCount above still increments normally for the
+    /// general move tally/HUD/save data. Defaults false so every other publish site is
+    /// unaffected.</summary>
+    public readonly bool WasGraceMove;
+
+    public PlayerMoveEvent(int moveCount, bool wasGraceMove = false)
+    {
+        MoveCount = moveCount;
+        WasGraceMove = wasGraceMove;
+    }
 }
+
+/// <summary>
+/// Fired the instant a Grace Move Chance roll succeeds (see GraceMoveController.RollForNextMove) -
+/// the PLAYER'S NEXT move will be a Grace Move (no damage, doesn't count toward a MoveCount
+/// goal). Not the same system as StageManager's stage-clear grace period - this is a separate,
+/// powerup-driven per-move mechanic that just happens to share the word "grace". UI hooks this to
+/// show a "Grace Move" callout and turn on a sustained highlight.
+/// </summary>
+public readonly struct GraceMoveArmedEvent { }
+
+/// <summary>Fired the instant an armed Grace Move is actually consumed by the player's next real
+/// (validly-registered) move - UI hooks this to fade the highlight back out.</summary>
+public readonly struct GraceMoveConsumedEvent { }
 
 public readonly struct StageCompletedEvent
 {

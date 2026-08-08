@@ -69,7 +69,7 @@ public class StageManager : MonoBehaviour
     public float CurrentGracePeriodRandomSpecialChance => currentStage != null ? currentStage.gracePeriodRandomSpecialChance : 0f;
     public bool CurrentAllowsNonMatchingSwaps => currentStage != null && currentStage.allowNonMatchingSwaps;
     public bool CurrentEnablesRandomSpecialOnGravity => currentStage != null && currentStage.enableRandomSpecialOnGravity;
-    public float CurrentRandomSpecialChance => currentStage != null ? currentStage.randomSpecialChance : 0f;
+    public float CurrentRandomSpecialChance => currentStage != null ? currentStage.wonkyChance : 0f;
     public bool CurrentSpawnsLocksOnRefill => currentStage != null && currentStage.spawnLocksOnRefill;
     public float CurrentLockSpawnChance => currentStage != null ? currentStage.lockSpawnChance : 0f;
     public FrozenTileSpawnMode CurrentFrozenTileSpawnMode => currentStage != null ? currentStage.frozenTileSpawnMode : FrozenTileSpawnMode.None;
@@ -257,6 +257,7 @@ public class StageManager : MonoBehaviour
         isStageClearPending = false;
         isAwaitingPowerupSelection = false;
         remainingGraceMoves = 0;
+        movesTowardGoal = 0;
         InitializeCollectProgress();
 
         if (gameManager != null)
@@ -306,20 +307,45 @@ public class StageManager : MonoBehaviour
         StartStage(0);
     }
 
+    [Header("Stage Clear")]
+    [Tooltip("Delay (seconds) between a stage's goal being finalized and the powerup selection " +
+             "screen actually appearing - gives a 'Stage Complete!' beat instead of an instant cut, " +
+             "especially now that a stage with 0 grace moves finalizes immediately rather than " +
+             "waiting out any bonus moves first. 0 = no delay, same as before.")]
+    [Min(0f)]
+    [SerializeField] private float stageClearDelay = 1f;
+
     public void FinalizeStageClear()
     {
         if (currentStage == null || !isStageClearPending || isStageCleared) return;
 
         isStageCleared = true;
         isStageClearPending = false;
+        isAwaitingPowerupSelection = true;
 
         if (gameManager != null)
             gameManager.SetState(GameManager.GameplayState.StageClearing);
 
-        isAwaitingPowerupSelection = true;
+        if (stageClearDelay > 0f)
+            StartCoroutine(FinishStageClearAfterDelay());
+        else
+            FinishStageClear();
+    }
+
+    private IEnumerator FinishStageClearAfterDelay()
+    {
+        yield return new WaitForSeconds(stageClearDelay);
+        FinishStageClear();
+    }
+
+    /// <summary>The actual "tell everything a stage is done" work, deferred behind stageClearDelay
+    /// (see FinalizeStageClear) - board cleanup + StageCompletedEvent, which PowerupManager listens
+    /// for to show the choice screen.</summary>
+    private void FinishStageClear()
+    {
         if (board != null)
         {
-            Debug.Log($"[StageManager] Stage {currentStageIndex + 1} clearing after grace period.");
+            Debug.Log($"[StageManager] Stage {currentStageIndex + 1} clearing.");
             board.BeginStageClearCleanup(() =>
             {
                 EventBus.Publish(new StageCompletedEvent(currentStageIndex, board.CurrentScore));
@@ -339,11 +365,24 @@ public class StageManager : MonoBehaviour
             CompleteStage();
     }
 
+    /// <summary>
+    /// Tracked separately from PlayerMoveEvent.MoveCount (Board's own running total, which still
+    /// increments for a Grace Move and feeds HUD/save data) specifically so a Grace Move can be
+    /// genuinely excluded from a MoveCount-type goal - if this instead compared directly against
+    /// evt.MoveCount, a Grace Move's contribution to that shared running total would still push a
+    /// LATER real move over the goal "for free", even if the check on the Grace Move's own event
+    /// were skipped. Reset to 0 in StartStage alongside remainingGraceMoves.
+    /// </summary>
+    private int movesTowardGoal;
+
     private void HandlePlayerMove(PlayerMoveEvent evt)
     {
         if (currentStage == null) return;
+        if (evt.WasGraceMove) return; // Grace Moves never count toward any stage requirement
         if (currentStage.goalType != StageGoalType.MoveCount) return;
-        if (evt.MoveCount >= currentStage.goalValue)
+
+        movesTowardGoal++;
+        if (movesTowardGoal >= currentStage.goalValue)
             CompleteStage();
     }
 
@@ -378,6 +417,23 @@ public class StageManager : MonoBehaviour
         return true;
     }
 
+    /// <summary>Playtest-only: forces the current stage to complete right now, exactly as if its
+    /// real goal had just been reached - goes through the same CompleteStage() path a genuine
+    /// completion would (grace period if the stage has one configured, or the immediate
+    /// FinalizeStageClear()+delay path if it has 0 - see CompleteStage/FinalizeStageClear), so it
+    /// exercises the real flow instead of a separate shortcut. Called by DebugFeatureModeMenu.</summary>
+    public void DebugForceCompleteStage()
+    {
+        if (currentStage == null)
+        {
+            Debug.LogWarning("[StageManager] DebugForceCompleteStage: no current stage.");
+            return;
+        }
+
+        Debug.Log($"[StageManager] DEBUG: forcing stage {currentStageIndex + 1} to complete.");
+        CompleteStage();
+    }
+
     private void CompleteStage()
     {
         if (currentStage == null || isTransitioning || isStageClearPending) return;
@@ -390,6 +446,20 @@ public class StageManager : MonoBehaviour
         int bonusGraceMoves = playerRunStats != null ? playerRunStats.BonusGraceMoves : 0;
         float specialChanceBonus = playerRunStats != null ? playerRunStats.RandomSpecialChanceBonus : 0f;
         remainingGraceMoves = currentStage.gracePeriodMoves + bonusGraceMoves;
+
+        // No grace moves for this stage (increasingly the normal case now that the separate
+        // Grace Move Chance system - GraceMoveController - covers the "occasional free move"
+        // niche instead) - skip the whole GracePeriod state dance and go straight into powerup
+        // selection. Without this the game gets stuck in GracePeriod forever: ConsumeStageClearGraceMove
+        // only finalizes once remainingGraceMoves ticks down to 0 via an actual player move, but it
+        // early-returns and does nothing when remainingGraceMoves is ALREADY 0, since there's no
+        // move left to consume.
+        if (remainingGraceMoves <= 0)
+        {
+            Debug.Log($"[StageManager] Stage {currentStageIndex + 1} goal reached with 0 grace moves - clearing immediately into powerup selection.");
+            FinalizeStageClear();
+            return;
+        }
 
         if (gameManager != null)
             gameManager.SetState(GameManager.GameplayState.GracePeriod);

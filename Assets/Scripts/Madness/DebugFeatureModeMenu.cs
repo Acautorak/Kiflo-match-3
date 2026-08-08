@@ -8,7 +8,12 @@ using UnityEngine.UI;
 /// Playtest-only debug menu: one button per feature mode, forcing MadnessFeatureTrigger to fire
 /// that feature the next time the board settles (Idle/GracePeriod) - bypassing the Madness meter
 /// entirely so you don't have to grind out matches to test Kebab Karnage / Free Spins / Lucky
-/// Scratch Ticket.
+/// Scratch Ticket. Also has a Reset Run section - deletes the on-disk save and resets every piece
+/// of in-memory run state (PlayerHealth, PlayerRunStats, MadnessMeter, board, stage) back to a
+/// fresh run in one two-tap-confirmed button, for wiping leftover dev state before cutting a
+/// build - and a Complete Stage button that forces the current stage's goal to be met right now
+/// via the real CompleteStage()/FinalizeStageClear() path, for testing the stage-clear delay and
+/// powerup selection flow without having to actually grind out a stage's goal first.
 ///
 /// Built at runtime as a plain UGUI Canvas + Buttons (no prefab needed) rather than OnGUI/IMGUI -
 /// this project's scratch panels already prove UGUI + EventSystem correctly receives clicks
@@ -21,17 +26,32 @@ using UnityEngine.UI;
 public class DebugFeatureModeMenu : MonoBehaviour
 {
     [SerializeField] private MadnessFeatureTrigger featureTrigger;
+    [Tooltip("Optional - auto-found. Needed for the Reset Run button.")]
+    [SerializeField] private StageManager stageManager;
+    [Tooltip("Optional - auto-found. Needed for the Reset Run button.")]
+    [SerializeField] private PlayerRunStats playerRunStats;
+    [Tooltip("Optional - auto-found. Needed for the Reset Run button.")]
+    [SerializeField] private PlayerHealth playerHealth;
     [SerializeField] private KeyCode toggleKey = KeyCode.BackQuote;
     [Tooltip("Start with the panel already visible - handy while actively iterating; flip off once it's just sitting in the scene for occasional use.")]
     [SerializeField] private bool startVisible = false;
 
     private GameObject panelRoot;
+    private TextMeshProUGUI resetButtonLabel;
+    private bool resetArmed;
+    private Coroutine disarmRoutine;
+    [Tooltip("How long the 'tap again to confirm' window stays open before silently re-arming to 'Reset Run', in case of a stray first tap.")]
+    [SerializeField] private float resetConfirmWindow = 3f;
 
     private void Awake()
     {
         if (featureTrigger == null) featureTrigger = FindAnyObjectByType<MadnessFeatureTrigger>();
         if (featureTrigger == null)
             Debug.LogWarning("[DebugFeatureModeMenu] No MadnessFeatureTrigger found in scene - buttons will be built but won't do anything.");
+
+        if (stageManager == null) stageManager = FindAnyObjectByType<StageManager>();
+        if (playerRunStats == null) playerRunStats = FindAnyObjectByType<PlayerRunStats>();
+        if (playerHealth == null) playerHealth = FindAnyObjectByType<PlayerHealth>();
 
         if (FindAnyObjectByType<EventSystem>() == null)
             Debug.LogWarning("[DebugFeatureModeMenu] No EventSystem found in scene - buttons won't receive clicks. " +
@@ -114,6 +134,15 @@ public class DebugFeatureModeMenu : MonoBehaviour
         AddButton(panelRoot.transform, "Kebab Karnage", () => featureTrigger?.DebugForceFeature(KebabKarnageManager.FeatureId));
         AddButton(panelRoot.transform, "Free Spins", () => featureTrigger?.DebugForceFeature(FreeSpinsManager.FeatureId));
         AddButton(panelRoot.transform, "Lucky Scratch Ticket", () => featureTrigger?.DebugForceFeature(LuckyScratchTicketManager.FeatureId));
+        AddButton(panelRoot.transform, "Tile Collector", () => featureTrigger?.DebugForceFeature(TileCollectorManager.FeatureId));
+
+        AddLabel(panelRoot.transform, "DEBUG: Reset Run", 16, FontStyles.Bold);
+        AddLabel(panelRoot.transform, "Deletes the save + resets stats/health", 12, FontStyles.Italic);
+        resetButtonLabel = AddButton(panelRoot.transform, "Reset Run", HandleResetButtonPressed);
+
+        AddLabel(panelRoot.transform, "DEBUG: Stage", 16, FontStyles.Bold);
+        AddLabel(panelRoot.transform, "Completes the current stage right now", 12, FontStyles.Italic);
+        AddButton(panelRoot.transform, "Complete Stage", () => stageManager?.DebugForceCompleteStage());
 
         AddLabel(panelRoot.transform, $"Toggle panel: '{toggleKey}'", 11, FontStyles.Normal);
     }
@@ -130,7 +159,7 @@ public class DebugFeatureModeMenu : MonoBehaviour
         tmp.alignment = TextAlignmentOptions.Left;
     }
 
-    private static void AddButton(Transform parent, string label, System.Action onClick)
+    private static TextMeshProUGUI AddButton(Transform parent, string label, System.Action onClick)
     {
         var go = new GameObject($"Button_{label}", typeof(RectTransform), typeof(Image), typeof(Button), typeof(LayoutElement));
         go.transform.SetParent(parent, false);
@@ -153,6 +182,66 @@ public class DebugFeatureModeMenu : MonoBehaviour
         tmp.color = Color.white;
         // Buttons shouldn't have their own label eat clicks meant for the Button behind them.
         tmp.raycastTarget = false;
+        return tmp;
+    }
+
+    /// <summary>Two-tap confirm (rather than a plain single-tap button) since this is destructive -
+    /// it deletes the on-disk save file, not just in-memory state. First tap arms it and relabels
+    /// the button; a second tap within resetConfirmWindow actually performs the reset. Left alone,
+    /// it silently re-arms back to the normal label so a single accidental tap can't nuke a run.</summary>
+    private void HandleResetButtonPressed()
+    {
+        if (!resetArmed)
+        {
+            resetArmed = true;
+            if (resetButtonLabel != null) resetButtonLabel.text = "Tap again to confirm";
+            if (disarmRoutine != null) StopCoroutine(disarmRoutine);
+            disarmRoutine = StartCoroutine(DisarmAfterDelay());
+            return;
+        }
+
+        if (disarmRoutine != null) StopCoroutine(disarmRoutine);
+        resetArmed = false;
+        if (resetButtonLabel != null) resetButtonLabel.text = "Reset Run";
+
+        PerformReset();
+    }
+
+    private System.Collections.IEnumerator DisarmAfterDelay()
+    {
+        yield return new WaitForSeconds(resetConfirmWindow);
+        resetArmed = false;
+        if (resetButtonLabel != null) resetButtonLabel.text = "Reset Run";
+    }
+
+    /// <summary>Deletes the on-disk save and resets every piece of in-memory run state back to a
+    /// fresh run, in one call - the thing you actually want before cutting a build, so a leftover
+    /// dev save/stat pile-up from testing doesn't ship or get carried into a fresh install's
+    /// first run by accident.</summary>
+    private void PerformReset()
+    {
+        SaveSystem.DeleteSave();
+        Debug.Log("[DebugFeatureModeMenu] Save file deleted.");
+
+        if (stageManager != null)
+        {
+            // StartNewRun() already resets PlayerHealth, PlayerRunStats, and MadnessMeter, clears
+            // the board, and restarts at stage 0 - one call covers everything, so there's no need
+            // to (and no reason to double-fire their change events by) resetting those two
+            // individually first.
+            stageManager.StartNewRun();
+        }
+        else
+        {
+            Debug.LogWarning("[DebugFeatureModeMenu] No StageManager found - falling back to resetting PlayerRunStats/PlayerHealth individually. Board/stage state will NOT be restarted, since that part of the reset only happens inside StageManager.StartNewRun().");
+            if (playerRunStats != null) playerRunStats.ResetForNewRun();
+            else Debug.LogWarning("[DebugFeatureModeMenu] No PlayerRunStats found either - stats not reset.");
+
+            if (playerHealth != null) playerHealth.ResetForNewRun();
+            else Debug.LogWarning("[DebugFeatureModeMenu] No PlayerHealth found either - health not reset.");
+        }
+
+        Debug.Log("[DebugFeatureModeMenu] Reset Run complete.");
     }
 }
 #endif

@@ -17,6 +17,11 @@ public class PlayerRunStats : MonoBehaviour
     [SerializeField] private float scoreMultiplier = 1f;
     [SerializeField] private int bonusGraceMoves = 0;
     [SerializeField] private int kebabTapDamageBonus = 0;
+    [Tooltip("Chance (0-1), rolled after every accepted move, that the FOLLOWING move becomes a " +
+             "Grace Move (no damage taken, doesn't count toward a MoveCount stage goal) - see " +
+             "GraceMoveController. Baseline 0, so this is purely a powerup-granted chance, same " +
+             "shape as randomSpecialChanceBonus above.")]
+    [SerializeField] private float graceMoveChanceBonus = 0f;
 
     /// <summary>
     /// Per-color score modifiers accumulated from powerups (see PowerupDefinition.colorEffects).
@@ -49,6 +54,8 @@ public class PlayerRunStats : MonoBehaviour
     public int BonusGraceMoves => Mathf.Max(0, bonusGraceMoves);
     /// <summary>Added to the base 1 tap damage dealt to Kebab Karnage asteroids per tap (see KebabKarnageManager).</summary>
     public int KebabTapDamageBonus => Mathf.Max(0, kebabTapDamageBonus);
+    /// <summary>Chance (0-1, clamped) that the next move after any given move becomes a Grace Move - see GraceMoveController.</summary>
+    public float GraceMoveChance => Mathf.Clamp01(graceMoveChanceBonus);
 
     public void ResetForNewRun()
     {
@@ -57,6 +64,7 @@ public class PlayerRunStats : MonoBehaviour
         scoreMultiplier = 1f;
         bonusGraceMoves = 0;
         kebabTapDamageBonus = 0;
+        graceMoveChanceBonus = 0f;
         scoreMultiplierApplyCount = 0;
         colorBonuses.Clear();
         EventBus.Publish(new PlayerStatsChangedEvent(this));
@@ -101,6 +109,13 @@ public class PlayerRunStats : MonoBehaviour
     {
         if (amount == 0) return;
         kebabTapDamageBonus = Mathf.Max(0, kebabTapDamageBonus + amount);
+        EventBus.Publish(new PlayerStatsChangedEvent(this));
+    }
+
+    public void AddGraceMoveChanceBonus(float amount)
+    {
+        if (amount == 0f) return;
+        graceMoveChanceBonus = Mathf.Clamp01(graceMoveChanceBonus + amount);
         EventBus.Publish(new PlayerStatsChangedEvent(this));
     }
 
@@ -175,6 +190,7 @@ public class PlayerRunStats : MonoBehaviour
             scoreMultiplier = scoreMultiplier,
             bonusGraceMoves = bonusGraceMoves,
             kebabTapDamageBonus = kebabTapDamageBonus,
+            graceMoveChanceBonus = graceMoveChanceBonus, // REQUIRES a matching field added to PlayerRunStatsSaveData - see note in RestoreFromSave
             colorBonuses = new ColorBonusSaveData[colorBonuses.Count]
         };
 
@@ -212,6 +228,10 @@ public class PlayerRunStats : MonoBehaviour
         scoreMultiplier = Mathf.Max(0f, data.scoreMultiplier);
         bonusGraceMoves = Mathf.Max(0, data.bonusGraceMoves);
         kebabTapDamageBonus = Mathf.Max(0, data.kebabTapDamageBonus);
+        // NOTE: this line (and its BuildSaveData counterpart above) assume PlayerRunStatsSaveData
+        // has a `public float graceMoveChanceBonus;` field - I don't have that class's source, so
+        // add the field there yourself if it isn't already present, or this won't compile.
+        graceMoveChanceBonus = Mathf.Clamp01(data.graceMoveChanceBonus);
         scoreMultiplierApplyCount = 0; // fresh diagnostic count for this session, not part of the save
 
         colorBonuses.Clear();

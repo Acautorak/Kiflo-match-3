@@ -164,6 +164,7 @@ public class Board : MonoBehaviour
     private SwapController swapController;
     private MatchResolver matchResolver;
     private FreeSpinsController freeSpinsController;
+    private TileCollectorController tileCollectorController;
     private bool isBusy;
     private bool isStageClearing;
     private GameManager gameManager;
@@ -246,6 +247,8 @@ public class Board : MonoBehaviour
 
         freeSpinsController = new FreeSpinsController(grid, symbolSpawner, matchResolver, gameManager, this, fallDuration, GridToWorld,
             freeSpinsColumnStartStagger, freeSpinsReelSpinDuration, freeSpinsReelTumbleStepDuration, freeSpinsMinimumForcedChain);
+
+        tileCollectorController = new TileCollectorController(grid, symbolSpawner, gravityController, this, this, matchResolver, madnessSystem);
     }
 
     private void Start()
@@ -458,7 +461,7 @@ public class Board : MonoBehaviour
         // chances up/down rather than replacing them - see PlayerRunStats for what feeds these.
         float specialBonus = playerRunStats != null ? playerRunStats.RandomSpecialChanceBonus : 0f;
         float lockReduction = playerRunStats != null ? playerRunStats.LockChanceReduction : 0f;
-        matchResolver.RandomSpecialTriggerChance = Mathf.Clamp01(stage.randomSpecialChance + specialBonus);
+        matchResolver.RandomSpecialTriggerChance = Mathf.Clamp01(stage.wonkyChance + specialBonus);
         lockingSystem.LockSpawnChance = Mathf.Clamp01(stage.lockSpawnChance - lockReduction);
     }
 
@@ -487,6 +490,11 @@ public class Board : MonoBehaviour
     /// </summary>
     public IEnumerator PlayFreeSpin() => freeSpinsController.SpinOnce();
 
+    /// <summary>Entry point for TileCollectorManager - runs one timed Tile Collector session on
+    /// the real board grid. See TileCollectorController.</summary>
+    public IEnumerator PlayTileCollectorSession(float duration, int scorePerTile) =>
+        tileCollectorController.RunSession(duration, scorePerTile);
+
     private void ClearExistingSymbols()
     {
         grid.ClearAll(occ => Destroy(occ.gameObject));
@@ -503,11 +511,24 @@ public class Board : MonoBehaviour
 
     #region Input / Swapping
 
+    /// <summary>Optional - lazily auto-found in TrySwap on first use (rather than in Awake) to
+    /// avoid needing to touch Board's existing Awake wiring. Fine to leave unassigned if this
+    /// scene doesn't use the Grace Move Chance system at all.</summary>
+    [SerializeField] private GraceMoveController graceMoveController;
+
     private IEnumerator TrySwap(Symbol a, Symbol b)
     {
         isBusy = true;
         gameManager?.SetState(GameManager.GameplayState.Playing);
         yield return swapController.SwapRoutine(a, b);
+
+        // Peek (not Consume) here, before ANYTHING damage-capable runs - the no-match penalty a
+        // few lines down needs to already be suppressed if this turns out to be a Grace Move, but
+        // whether this swap ultimately counts as a real move isn't known until swapIsValid below,
+        // so the actual Consume() call is deferred until then (see the comment there).
+        if (graceMoveController == null) graceMoveController = FindAnyObjectByType<GraceMoveController>();
+        bool isGraceMove = graceMoveController != null && graceMoveController.PeekArmed();
+        if (isGraceMove) playerHealth?.SetDamageImmune(true);
 
         var matchGroups = MatchFinder.FindMatchGroups(grid.RawGrid, width, height, madnessSystem.TreatMadnessSymbolsAsWildcards);
         Debug.Log($"[Board] Post-swap scan: {matchGroups.Count} group(s) - " +
@@ -515,18 +536,27 @@ public class Board : MonoBehaviour
                        $"cells={g.Cells.Count} lines={g.Lines.Count} intersection={g.IsIntersection} longestRun={g.LongestRun}")));
 
         if (matchGroups.Count == 0)
-            ApplyHealthPenalty();
+            ApplyHealthPenalty(); // no-ops on its own via PlayerHealth.IsDamageImmune if isGraceMove
 
         bool swapIsValid = matchGroups.Count > 0 || allowNonMatchingSwaps;
         if (!swapIsValid)
         {
             yield return swapController.SwapRoutine(a, b); // revert - no match, invalid move
             isBusy = false;
+            // Not a real move - turn immunity back off without ever calling Consume(), so a still-
+            // armed Grace Move stays armed for the player's actual next attempt instead of being
+            // wasted on a swap that got reverted.
+            if (isGraceMove) playerHealth?.SetDamageImmune(false);
             RestoreGameManagerRestingState();
             yield break;
         }
 
-        RegisterPlayerMove();
+        // Now that this swap is confirmed to count as a real move, actually consume the armed
+        // Grace Move (fires GraceMoveConsumedEvent so UI fades its highlight) and tell
+        // RegisterPlayerMove so StageManager can exclude it from a MoveCount goal.
+        if (isGraceMove) graceMoveController.Consume();
+
+        RegisterPlayerMove(isGraceMove);
         ConsumeStageClearGraceMove();
         yield return matchResolver.TryRandomSpecialOnGraceMove();
 
@@ -565,14 +595,30 @@ public class Board : MonoBehaviour
         if (postSurvivalMatches.Count > 0)
             yield return ResolveMatches(postSurvivalMatches);
 
+        // Immunity covered everything above (the no-match penalty, match resolution, TickSurvival)
+        // since it was switched on right at the top - turn it off now that the move is fully done.
+        if (isGraceMove) playerHealth?.SetDamageImmune(false);
+
+        // Roll for whether the NEXT move becomes a Grace Move - only reached for a real, counted
+        // move (the invalid/reverted path above returns early before this), and happens whether
+        // or not THIS move itself was a Grace Move, so consecutive Grace Moves can still chain on
+        // a lucky roll.
+        graceMoveController?.RollForNextMove();
+
         isBusy = false;
         RestoreGameManagerRestingState();
     }
 
-    private void RegisterPlayerMove()
+    private void RegisterPlayerMove(bool wasGraceMove = false)
     {
-        moveCount++;
-        EventBus.Publish(new PlayerMoveEvent(moveCount));
+        // A Grace Move no longer bumps the running total at all - it's a genuinely free move,
+        // not just excluded from a MoveCount stage goal. moveCount stays exactly where it was,
+        // so HUD/save data don't tick either; the event still fires (with the unchanged
+        // moveCount) so other listeners - MadnessFeatureTrigger's guaranteed-fallback pacing,
+        // StageManager's now-redundant-but-harmless WasGraceMove check - still see that a move
+        // happened.
+        if (!wasGraceMove) moveCount++;
+        EventBus.Publish(new PlayerMoveEvent(moveCount, wasGraceMove));
     }
 
     private void ApplyHealthPenalty(int amount = 1)
@@ -581,9 +627,27 @@ public class Board : MonoBehaviour
             playerHealth.TakeDamage(amount);
     }
 
-    public void SelectSymbol(Symbol symbol) => swapController.SelectSymbol(symbol);
+    public void SelectSymbol(Symbol symbol)
+    {
+        if (tileCollectorController != null && tileCollectorController.IsActive)
+        {
+            tileCollectorController.TryCollect(symbol);
+            return;
+        }
+        swapController.SelectSymbol(symbol);
+    }
 
-    public void SwipeSymbol(Symbol symbol, Vector2Int direction) => swapController.SwipeSymbol(symbol, direction);
+    public void SwipeSymbol(Symbol symbol, Vector2Int direction)
+    {
+        // Any gesture on a tile just collects it during Tile Collector - a slightly-dragged tap
+        // shouldn't fail to register just because it crossed the swipe threshold.
+        if (tileCollectorController != null && tileCollectorController.IsActive)
+        {
+            tileCollectorController.TryCollect(symbol);
+            return;
+        }
+        swapController.SwipeSymbol(symbol, direction);
+    }
     #endregion
 
     #region Matching / Cascades

@@ -30,6 +30,10 @@ public class PowerupDefinition : ScriptableObject
     public int healAmount;
     [Tooltip("Added to PlayerRunStats.KebabTapDamageBonus - increases damage dealt per tap during Kebab Karnage (and future tap-based feature modes that read the same stat) for the rest of the run.")]
     public int bonusKebabTapDamage;
+    [Tooltip("Added to PlayerRunStats.GraceMoveChance (0-1 fraction, e.g. 0.1 = +10%) - the chance, " +
+             "rolled after every move, that the following move becomes a Grace Move (no damage, " +
+             "doesn't count toward a MoveCount stage goal). See GraceMoveController.")]
+    [Range(0f, 1f)] public float graceMoveChanceBonus;
 
     [Header("Per-Color Effect - leave empty to skip. Add one entry per color you want to buff.")]
     [Tooltip("Each entry targets one SymbolType. All three fields on an entry stack additively " +
@@ -64,6 +68,7 @@ public class PowerupDefinition : ScriptableObject
             stats.AddScoreMultiplier(scoreMultiplierBonus);
             stats.AddBonusGraceMoves(bonusGraceMoves);
             stats.AddKebabTapDamageBonus(bonusKebabTapDamage);
+            stats.AddGraceMoveChanceBonus(graceMoveChanceBonus);
 
             if (colorEffects != null)
                 foreach (var ce in colorEffects)

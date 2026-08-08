@@ -9,6 +9,15 @@ public class PlayerHealth : MonoBehaviour
 
     public int CurrentHealth => currentHealth;
     public int MaxHealth => maxHealth;
+    /// <summary>True while a Grace Move (see GraceMoveController) is being resolved - TakeDamage
+    /// no-ops entirely while this is set, covering every damage source that routes through it
+    /// (match-based color damage, the no-match swap penalty, Madness ignite effects, etc.)
+    /// without needing to touch any of those systems individually. Heal is deliberately NOT
+    /// gated by this - a Grace Move blocks damage, not healing.</summary>
+    public bool IsDamageImmune { get; private set; }
+
+    /// <summary>Toggles damage immunity - Board wraps this around a Grace Move's resolution.</summary>
+    public void SetDamageImmune(bool immune) => IsDamageImmune = immune;
 
     private void Awake()
     {
@@ -39,6 +48,12 @@ public class PlayerHealth : MonoBehaviour
     public void TakeDamage(int amount = 1)
     {
         if (amount <= 0 || currentHealth <= 0) return;
+
+        if (IsDamageImmune)
+        {
+            Debug.Log($"[PlayerHealth] TakeDamage({amount}) suppressed - a Grace Move is active.");
+            return;
+        }
 
         currentHealth = Mathf.Max(0, currentHealth - amount);
         PublishState();

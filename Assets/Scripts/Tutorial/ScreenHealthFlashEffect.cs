@@ -9,6 +9,13 @@ using UnityEngine.UI;
 /// delta, so this tracks the previous value itself to tell heal from damage - same shape as how
 /// ScoreChangedEvent already carries its own Delta, HealthChangedEvent just doesn't).
 ///
+/// Also drives a second, differently-shaped effect on the same overlay: a sustained "Grace Move"
+/// highlight (see GraceMoveController) that fades IN and holds - rather than blinking and fading
+/// like the heal/damage flash - for as long as an armed Grace Move is waiting to be used, fading
+/// back out once GraceMoveConsumedEvent fires. Deliberately reuses the same flashGraphic as the
+/// heal/damage blink for now (see the Grace Move Highlight header's tooltip for the known overlap
+/// caveat) rather than a separate overlay.
+///
 /// Drop a full-screen UI Graphic (an Image with your texture as its Sprite, or a RawImage) on a
 /// Canvas that renders above the board/HUD, start it fully transparent, and assign it here as
 /// flashGraphic - this script drives its color/alpha, you just place and size it in the scene the
@@ -43,9 +50,23 @@ public class ScreenHealthFlashEffect : MonoBehaviour
     [Min(0f)]
     [SerializeField] private float blinkDownDuration = 0.1f;
 
+    [Header("Grace Move Highlight")]
+    [Tooltip("Reuses the same Flash Graphic as the heal/damage blink above, per an explicit call to " +
+             "keep this simple for now - if a heal/damage flash happens to fire WHILE a Grace Move " +
+             "highlight is being held, they'll visibly fight over the same Graphic's color since " +
+             "both write to it independently. Fine for now; split onto a second overlay later if " +
+             "that overlap turns out to look bad in practice.")]
+    [SerializeField] private Color graceMoveHighlightColor = new Color(0.4f, 0.75f, 1f, 0.3f);
+    [SerializeField] private float graceMoveFadeInDuration = 0.25f;
+    [SerializeField] private float graceMoveFadeOutDuration = 0.4f;
+
     private int lastKnownHealth;
     private bool hasBaseline;
     private Sequence activeSequence;
+    /// <summary>Separate from activeSequence (the blink-then-fade one) since this one holds
+    /// rather than auto-completing - kept as its own handle so killing/replacing one never
+    /// interrupts the other.</summary>
+    private Tween activeHighlightTween;
 
     private void Awake()
     {
@@ -71,9 +92,35 @@ public class ScreenHealthFlashEffect : MonoBehaviour
     {
         EventBus.Unsubscribe<HealthChangedEvent>(HandleHealthChanged);
         EventBus.Subscribe<HealthChangedEvent>(HandleHealthChanged);
+        EventBus.Unsubscribe<GraceMoveArmedEvent>(HandleGraceMoveArmed);
+        EventBus.Subscribe<GraceMoveArmedEvent>(HandleGraceMoveArmed);
+        EventBus.Unsubscribe<GraceMoveConsumedEvent>(HandleGraceMoveConsumed);
+        EventBus.Subscribe<GraceMoveConsumedEvent>(HandleGraceMoveConsumed);
     }
 
-    private void OnDisable() => EventBus.Unsubscribe<HealthChangedEvent>(HandleHealthChanged);
+    private void OnDisable()
+    {
+        EventBus.Unsubscribe<HealthChangedEvent>(HandleHealthChanged);
+        EventBus.Unsubscribe<GraceMoveArmedEvent>(HandleGraceMoveArmed);
+        EventBus.Unsubscribe<GraceMoveConsumedEvent>(HandleGraceMoveConsumed);
+    }
+
+    /// <summary>Fades the highlight IN and holds it there (no auto-fade timer) until
+    /// HandleGraceMoveConsumed fades it back out - a sustained state, not a blink.</summary>
+    private void HandleGraceMoveArmed(GraceMoveArmedEvent evt)
+    {
+        if (flashGraphic == null) return;
+        activeHighlightTween?.Kill();
+        activeHighlightTween = flashGraphic.DOColor(graceMoveHighlightColor, graceMoveFadeInDuration);
+    }
+
+    private void HandleGraceMoveConsumed(GraceMoveConsumedEvent evt)
+    {
+        if (flashGraphic == null) return;
+        activeHighlightTween?.Kill();
+        Color transparent = new Color(graceMoveHighlightColor.r, graceMoveHighlightColor.g, graceMoveHighlightColor.b, 0f);
+        activeHighlightTween = flashGraphic.DOColor(transparent, graceMoveFadeOutDuration);
+    }
 
     private void HandleHealthChanged(HealthChangedEvent evt)
     {
@@ -129,5 +176,9 @@ public class ScreenHealthFlashEffect : MonoBehaviour
         flashGraphic.color = c;
     }
 
-    private void OnDestroy() => activeSequence?.Kill();
+    private void OnDestroy()
+    {
+        activeSequence?.Kill();
+        activeHighlightTween?.Kill();
+    }
 }

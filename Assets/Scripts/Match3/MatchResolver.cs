@@ -378,7 +378,7 @@ public class MatchResolver
             if (occ != null) EventBus.Publish(new SymbolMatchedEvent(occ.Type, pos));
         }
 
-        EventBus.Publish(new SpecialSymbolMatchedEvent(effectType, origin, affected.ToArray()));
+        EventBus.Publish(new SpecialSymbolMatchedEvent(effectType, origin, affected.ToArray(), isWonkyProc: true));
         EventBus.Publish(new ChainMatchedEvent(affected.Count, 1, affected.ToArray()));
 
         int scoreDelta = 0;
@@ -436,8 +436,9 @@ public class MatchResolver
                 if (occ != null) EventBus.Publish(new SymbolMatchedEvent(occ.Type, pos));
             }
 
-            // Same open event a real special match fires - VFX/SFX hooked via SpecialSymbolEventRelay just work.
-            EventBus.Publish(new SpecialSymbolMatchedEvent(effectType, origin, affected.ToArray()));
+            // Same open event a real special match fires - VFX/SFX hooked via SpecialSymbolEventRelay
+            // just work - except isWonkyProc:true here so a distinct "WONKY!" callout can fire too.
+            EventBus.Publish(new SpecialSymbolMatchedEvent(effectType, origin, affected.ToArray(), isWonkyProc: true));
             EventBus.Publish(new ChainMatchedEvent(affected.Count, chainCount, affected.ToArray()));
 
             int scoreDelta = 0;

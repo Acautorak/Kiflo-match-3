@@ -51,8 +51,13 @@ public class ComboPopupText : MonoBehaviour
     /// <summary>
     /// Plays the pop-in / rise / fade animation, then destroys the GameObject on completion.
     /// riseDistance/lifetime/punchScale let the caller scale the effect with combo size.
+    /// shakeStrength/shakeVibrato are optional (default to 0/off) - a horizontal jitter Joined
+    /// on top of the rise, restricted to the X axis so it doesn't fight DOMoveY's control of Y.
+    /// fadeOut on the shake means it settles down over the tween's duration rather than jittering
+    /// at full strength right up until it's destroyed.
     /// </summary>
-    public void Play(string text, Color color, float fontSize, float riseDistance, float lifetime, float punchScale)
+    public void Play(string text, Color color, float fontSize, float riseDistance, float lifetime, float punchScale,
+        float shakeStrength = 0f, int shakeVibrato = 10)
     {
         if (label == null) label = GetComponentInChildren<TMP_Text>();
         if (label == null)
@@ -84,6 +89,13 @@ public class ComboPopupText : MonoBehaviour
         // For the remainder of the lifetime: rise upward and fade out near the end.
         seq.Join(transform.DOMoveY(startY + riseDistance, lifetime * 0.85f).SetEase(Ease.OutCubic));
         seq.Join(label.DOFade(0f, lifetime * 0.6f).SetDelay(lifetime * 0.25f));
+
+        // Optional horizontal vibrate while it rises - Y strength is 0 so this never competes
+        // with the DOMoveY tween above for control of the vertical axis, only jitters X. fadeOut
+        // (the 5th positional bool arg) tapers the jitter down over the duration instead of
+        // cutting off abruptly at full strength right as the popup is destroyed.
+        if (shakeStrength > 0f)
+            seq.Join(transform.DOShakePosition(lifetime, new Vector3(shakeStrength, 0f, 0f), shakeVibrato, 90f, false, true));
 
         seq.OnComplete(() => Destroy(gameObject));
     }

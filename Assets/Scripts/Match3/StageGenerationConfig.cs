@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.Serialization;
 
 /// <summary>
 /// Designer-facing asset that fully drives procedural stage generation. Create via
@@ -46,7 +47,11 @@ public class StageGenerationConfig : ScriptableObject
     [Header("Random Special On Gravity")]
     [Tooltip("Stage depth at which the random gravity-bonus effect can first turn on for a stage.")]
     [Min(0)] public int randomSpecialOnGravityUnlockDepth = 6;
-    public FloatRange randomSpecialChance = new FloatRange { min = 0.02f, max = 0.15f };
+    [FormerlySerializedAs("randomSpecialChance")]
+    [Tooltip("Renamed from 'Random Special Chance' to match the 'Wonky' terminology used " +
+             "everywhere else for this same spontaneous-proc mechanic (IsWonkyProc, the WONKY! " +
+             "popup, etc.) - FormerlySerializedAs keeps any values you've already tuned here.")]
+    public FloatRange wonkyChance = new FloatRange { min = 0.02f, max = 0.15f };
     public IntRange maxConsecutiveRandomTriggers = new IntRange { min = 1, max = 3 };
 
     [Header("Locks / Freezing - Rules")]
@@ -97,6 +102,7 @@ public class StageGenerationConfig : ScriptableObject
         new FeatureModeWeight { mode = MadnessFeatureModeChoice.KebabKarnage, weight = 1f },
         new FeatureModeWeight { mode = MadnessFeatureModeChoice.FreeSpins, weight = 1f },
         new FeatureModeWeight { mode = MadnessFeatureModeChoice.LuckyScratchTicket, weight = 1f },
+        new FeatureModeWeight { mode = MadnessFeatureModeChoice.TileCollector, weight = 1f },
     };
 
     [Header("Rules (fixed - not scaled by difficulty)")]

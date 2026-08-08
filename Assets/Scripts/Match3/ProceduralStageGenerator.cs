@@ -48,7 +48,7 @@ public static class ProceduralStageGenerator
         stage.gracePeriodRandomSpecialChance = config.gracePeriodRandomSpecialChance.Lerp(t);
 
         stage.enableRandomSpecialOnGravity = depth >= config.randomSpecialOnGravityUnlockDepth;
-        stage.randomSpecialChance = stage.enableRandomSpecialOnGravity ? config.randomSpecialChance.Lerp(t) : 0f;
+        stage.wonkyChance = stage.enableRandomSpecialOnGravity ? config.wonkyChance.Lerp(t) : 0f;
         stage.maxConsecutiveRandomTriggers = config.maxConsecutiveRandomTriggers.Lerp(t);
 
         stage.spawnLocksOnRefill = depth >= config.locksOnRefillUnlockDepth;

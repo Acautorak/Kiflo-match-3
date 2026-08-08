@@ -1,5 +1,6 @@
 using System;
 using UnityEngine;
+using UnityEngine.Serialization;
 
 [Serializable]
 public class StageDefinition
@@ -22,7 +23,8 @@ public class StageDefinition
     [Min(0)] public int frozenTileBottomRowCount = 0;
     [Min(0)] public int gracePeriodMoves = 3;
     [Range(0f, 1f)] public float gracePeriodRandomSpecialChance = 0f;
-    [Range(0f, 1f)] public float randomSpecialChance = 0.05f;
+    [FormerlySerializedAs("randomSpecialChance")]
+    [Range(0f, 1f)] public float wonkyChance = 0.05f;
     [Min(0)] public int maxConsecutiveRandomTriggers = 3;
     [Range(0f, 1f)] public float lockSpawnChance = 0.05f;
 
@@ -39,7 +41,8 @@ public enum MadnessFeatureModeChoice
 {
     KebabKarnage,
     FreeSpins,
-    LuckyScratchTicket
+    LuckyScratchTicket,
+    TileCollector
 }
 
 public enum StageGoalType

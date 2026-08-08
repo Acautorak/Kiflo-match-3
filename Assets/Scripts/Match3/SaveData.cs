@@ -43,6 +43,9 @@ public class PlayerRunStatsSaveData
     public float scoreMultiplier;
     public int bonusGraceMoves;
     public int kebabTapDamageBonus;
+    /// <summary>The Grace Move Chance system's stat (see GraceMoveController) - unrelated to
+    /// bonusGraceMoves above, which belongs to the older, separate stage-clear grace period.</summary>
+    public float graceMoveChanceBonus;
     public ColorBonusSaveData[] colorBonuses;
 }
 
