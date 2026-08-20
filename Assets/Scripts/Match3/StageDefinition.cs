@@ -14,6 +14,18 @@ public class StageDefinition
              "ALL of them must be satisfied to complete the stage.")]
     public CollectGoalTarget[] collectTargets;
 
+    [Tooltip("Hand-authored board shape for this stage - which cells within Width x Height are " +
+             "playable. Leave the mask empty for a full rectangle. Ignored (overridden) when " +
+             "ProceduralStageGenerator hands Board a generated shape instead - see " +
+             "ProceduralStageGenerator.GenerateShape and Board.ResetForStage's proceduralShape param.")]
+    public BoardShapeData shape;
+    [Tooltip("Only matters when this stage has holes (see shape above). True: a hole is a floor/" +
+             "ceiling - symbols above it can't fall past it into whatever's below, splitting the " +
+             "column into independent pockets. False: gravity passes straight through - a hole is " +
+             "just a slot nothing can ever occupy, and symbols fall past it as if it weren't " +
+             "there. Untested which plays better - see GravityController.HolesBlockGravity.")]
+    public bool holesBlockGravity = true;
+
     public bool allowNonMatchingSwaps = true;
     public bool enableRandomSpecialOnGravity = false;
     public bool spawnLocksOnRefill = false;
@@ -42,7 +54,9 @@ public enum MadnessFeatureModeChoice
     KebabKarnage,
     FreeSpins,
     LuckyScratchTicket,
-    TileCollector
+    TileCollector,
+    DiscoDanceDisco,
+    CookieSmash
 }
 
 public enum StageGoalType

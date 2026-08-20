@@ -26,6 +26,7 @@ public class MatchResolver
     private readonly SpecialEffectSystem specialEffectSystem;
     private readonly MadnessSystem madnessSystem;
     private readonly LockingSystem lockingSystem;
+    private readonly BurningSystem burningSystem;
     private readonly ScoreTracker scoreTracker;
     private readonly SymbolSpawner symbolSpawner;
     private readonly PlayerHealth playerHealth;
@@ -69,7 +70,7 @@ public class MatchResolver
     public int MaxCascadeSteps { get; set; } = 50;
 
     public MatchResolver(GridModel grid, GravityController gravityController, SpecialEffectSystem specialEffectSystem,
-        MadnessSystem madnessSystem, LockingSystem lockingSystem, ScoreTracker scoreTracker, SymbolSpawner symbolSpawner,
+        MadnessSystem madnessSystem, LockingSystem lockingSystem, BurningSystem burningSystem, ScoreTracker scoreTracker, SymbolSpawner symbolSpawner,
         PlayerHealth playerHealth, PlayerRunStats playerRunStats, MadnessBoardModifiers madnessBoardModifiers,
         GameManager gameManager, System.Func<int, int, Vector3> gridToWorld, System.Func<bool> shouldSkipRefillGeneration,
         System.Func<bool> isStageClearing, System.Func<bool> isGraceActive, System.Func<int> graceMovesRemaining,
@@ -80,6 +81,7 @@ public class MatchResolver
         this.specialEffectSystem = specialEffectSystem;
         this.madnessSystem = madnessSystem;
         this.lockingSystem = lockingSystem;
+        this.burningSystem = burningSystem;
         this.scoreTracker = scoreTracker;
         this.symbolSpawner = symbolSpawner;
         this.playerHealth = playerHealth;
@@ -120,11 +122,11 @@ public class MatchResolver
                 // Color-targeted "heal on match" powerups roll their chance once per matched
                 // group here, before any clearing happens below, while the seed cell's Occupant
                 // is still valid. Baseline chance is 0 - only present if a powerup added to it.
-                if (playerRunStats != null)
+                var seed = group.GetSeedCell();
+                var seedOcc = grid[seed.x, seed.y].Occupant;
+                if (seedOcc != null)
                 {
-                    var seed = group.GetSeedCell();
-                    var seedOcc = grid[seed.x, seed.y].Occupant;
-                    if (seedOcc != null)
+                    if (playerRunStats != null)
                     {
                         float healChance = playerRunStats.GetColorHealChance(seedOcc.Type);
                         if (healChance > 0f && Random.value < healChance)
@@ -133,7 +135,26 @@ public class MatchResolver
                             if (healAmount > 0) playerHealth?.Heal(healAmount);
                         }
                     }
+
+                    // Madness ignite damage: once per matched GROUP, not once per destroyed cell
+                    // (see ClearCell, which used to roll this per-cell - a single 5-run would deal
+                    // 5x the intended damage, and an intersection/L-shape even more). Rolled here,
+                    // same timing/granularity as the heal-chance check above, using the group's
+                    // seed color as the representative color for the whole group.
+                    if (madnessBoardModifiers != null)
+                    {
+                        int igniteDamage = madnessBoardModifiers.GetColorDamagePerMatch(seedOcc.Type);
+                        if (igniteDamage > 0) playerHealth?.TakeDamage(igniteDamage);
+                    }
                 }
+
+                // Same once-per-group granularity as the heal-chance roll above - "Chance on
+                // Match to ignite 1 nearby symbol" (see PowerupDefinition.igniteOnMatchChanceBonus/
+                // PlayerRunStats.IgniteOnMatchChance). Runs before this group's own cells get
+                // cleared below, so the target tile - one of the 8 cells around the seed, not a
+                // matched cell itself - is picked while the board still reflects this group's
+                // pre-clear state.
+                burningSystem?.TryIgniteNearby(group.GetSeedCell());
             }
 
             // Any special symbols caught inside this match activate and pull in extra cells.
@@ -251,7 +272,8 @@ public class MatchResolver
         if (group.IsIntersection && IntersectionsCreateBombs)
         {
             var seed = group.GetSeedCell();
-            RegisterSpecialSeed(seed, SpecialType.Bomb, specialsToCreate);
+            var color = GetMatchedColor(group.Cells, seed);
+            RegisterSpecialSeed(seed, SpecialType.Bomb, color, specialsToCreate);
             return;
         }
 
@@ -272,14 +294,45 @@ public class MatchResolver
             ? SpecialType.ColorClear
             : (line[0].y == line[1].y ? SpecialType.RowClear : SpecialType.ColumnClear);
 
-        RegisterSpecialSeed(seed, special, specialsToCreate);
+        var color = GetMatchedColor(line, seed);
+        RegisterSpecialSeed(seed, special, color, specialsToCreate);
     }
 
-    private void RegisterSpecialSeed(Vector2Int seed, SpecialType special,
+    /// <summary>
+    /// The color a newly-created special should carry: the actual matched color of the run, NOT
+    /// necessarily whatever sits at the seed cell. A run's seed is just its middle index (or an
+    /// intersection's shared cell) - MatchFinder deliberately lets wildcard cells (an existing
+    /// Special symbol, or a Madness Symbol when TreatMadnessSymbolsAsWildcards is on) join ANY
+    /// color's run without being that color themselves, so a wildcard can easily land ON the
+    /// seed position (e.g. Red,Red,Bomb,Red,Red - the Bomb sits in the middle). Previously the
+    /// seed cell's own Type was used unconditionally, which meant a new ColorClear/RowClear/
+    /// ColumnClear/Bomb could inherit an unrelated leftover color from whatever wildcard happened
+    /// to be sitting there instead of the color actually matched - this is that bug's fix.
+    /// Prefers the seed cell if it's a genuine (non-wildcard) match; otherwise scans the rest of
+    /// the run for the first non-wildcard cell; only falls back to the seed's own Type (or Red)
+    /// if literally every cell in the run is a wildcard.
+    /// </summary>
+    private SymbolType GetMatchedColor(IEnumerable<Vector2Int> cells, Vector2Int seed)
+    {
+        bool IsWildcard(Symbol s) => s.Special != SpecialType.None
+            || (madnessSystem.TreatMadnessSymbolsAsWildcards && s.IsMadness);
+
+        var seedOcc = grid[seed.x, seed.y].Occupant;
+        if (seedOcc != null && !IsWildcard(seedOcc)) return seedOcc.Type;
+
+        foreach (var p in cells)
+        {
+            var occ = grid[p.x, p.y].Occupant;
+            if (occ != null && !IsWildcard(occ)) return occ.Type;
+        }
+
+        return seedOcc?.Type ?? SymbolType.Red; // every cell in this run was a wildcard - no genuine color to fall back to
+    }
+
+    private void RegisterSpecialSeed(Vector2Int seed, SpecialType special, SymbolType color,
         Dictionary<Vector2Int, (SpecialType special, SymbolType type)> specialsToCreate)
     {
-        var seedType = grid[seed.x, seed.y].Occupant?.Type ?? SymbolType.Red;
-        specialsToCreate[seed] = (special, seedType);
+        specialsToCreate[seed] = (special, color);
     }
 
     /// <summary>
@@ -342,8 +395,9 @@ public class MatchResolver
         if (madnessBoardModifiers != null)
         {
             colorMultiplierBonus += madnessBoardModifiers.GetColorScoreMultiplierBonus(color);
-            int igniteDamage = madnessBoardModifiers.GetColorDamagePerMatch(color);
-            if (igniteDamage > 0) playerHealth?.TakeDamage(igniteDamage);
+            // NOTE: ignite damage (GetColorDamagePerMatch) is intentionally NOT applied here -
+            // see the per-group roll earlier in Resolve(). Rolling it per destroyed cell here
+            // used to mean a single N-cell match dealt Nx the intended damage.
         }
 
         if (colorMultiplierBonus != 0f)

@@ -1,3 +1,4 @@
+using System.Collections;
 using DG.Tweening;
 using UnityEngine;
 #if ENABLE_INPUT_SYSTEM
@@ -55,6 +56,12 @@ public class Symbol : MonoBehaviour
     [SerializeField] private SpriteRenderer lockOverlayRenderer;
     [SerializeField] private LockVisualConfig lockVisualConfig;
 
+    [Header("Burning (optional)")]
+    [Tooltip("Child GameObject holding the burning look (e.g. a fire/ember overlay). Should be " +
+             "INACTIVE by default in the prefab, same as lockOverlay - Symbol just calls " +
+             "SetActive(true/false) on it based on burning state, nothing more.")]
+    [SerializeField] private GameObject burningOverlay;
+
     [Header("Madness (optional)")]
     [Tooltip("Child GameObject holding the Madness look (e.g. a swirling overlay). Should be " +
              "INACTIVE by default in the prefab, same as lockOverlay - Symbol just calls " +
@@ -83,6 +90,8 @@ public class Symbol : MonoBehaviour
     [SerializeField] private GameObject madnessImmunityOverlay;
 
     private Tween activeTween;
+    private Tween danceTween;
+    private Coroutine danceRoutine;
 
     public int LockLayers { get; private set; }
     public LockBehavior LockBehaviorMode { get; private set; } = LockBehavior.None;
@@ -199,6 +208,79 @@ public class Symbol : MonoBehaviour
         return true;
     }
 
+    // --- Burning status (see BurningSystem) - modeled directly on the Lock API just above:
+    // SetBurning is the SetLock equivalent, TickBurning is the TickTemporaryLock equivalent.
+    public bool IsBurning { get; private set; }
+    public int MovesUntilBurnOut { get; private set; }
+
+    // Total duration the current burn started with, so TickBurning can compute a 0-1 progress
+    // for the shader (_BurnAmount) rather than just an absolute moves-remaining count. Set fresh
+    // every time SetBurning ignites (movesUntilBurnOut > 0).
+    private int burnTotalMoves;
+
+    private static readonly int BurnAmountID = Shader.PropertyToID("_BurnAmount");
+    private MaterialPropertyBlock burnPropertyBlock;
+
+    /// <summary>_BurnAmount value pushed the instant a tile ignites - a small but nonzero floor
+    /// rather than 0, so the shader's edge-glow/erosion kicks in immediately (it's gated behind
+    /// _BurnAmount > 0.001) instead of the tile looking untouched until the first TickBurning
+    /// call on the next move. TickBurning's own progress calculation never drops below this
+    /// floor either, so there's no visible jump/reset once real ticking starts.</summary>
+    private const float IgniteStartAmount = 0.05f;
+
+    /// <summary>Starts (or refreshes) this symbol's burn countdown - see BurningSystem.
+    /// TryIgniteNearby for how a tile gets set alight in the first place. Pass 0 to put out an
+    /// existing burn without collecting it (used by SymbolSpawner.Despawn to make sure a pooled
+    /// instance doesn't come back out already on fire). Igniting pushes _BurnAmount to
+    /// IgniteStartAmount immediately (see that constant's doc) rather than 0, so the SymbolBurning
+    /// shader visibly reacts the instant this is called; putting a burn out resets to 0 since
+    /// there's nothing left to show.</summary>
+    public void SetBurning(int movesUntilBurnOut)
+    {
+        IsBurning = movesUntilBurnOut > 0;
+        MovesUntilBurnOut = Mathf.Max(0, movesUntilBurnOut);
+        if (IsBurning) burnTotalMoves = MovesUntilBurnOut;
+        if (burningOverlay != null) burningOverlay.SetActive(IsBurning);
+        ApplyBurnAmount(IsBurning ? IgniteStartAmount : 0f);
+    }
+
+    /// <summary>Call once per accepted player move (see BurningSystem.TickAllBurningTiles).
+    /// Returns true the instant the countdown reaches 0 - the caller (BurningSystem) is
+    /// responsible for actually collecting the tile; this only manages the counter/visual, same
+    /// division of responsibility as TickTemporaryLock/LockingSystem.MeltAllTemporaryLocks. Also
+    /// pushes the current burn progress (IgniteStartAmount = just ignited, 1 = about to burn out)
+    /// to the SymbolBurning shader every tick, so the tile visibly chars up over its countdown
+    /// rather than looking identical until the moment it's collected.</summary>
+    public bool TickBurning()
+    {
+        if (!IsBurning) return false;
+
+        MovesUntilBurnOut--;
+        float progress = burnTotalMoves > 0 ? 1f - Mathf.Clamp01((float)MovesUntilBurnOut / burnTotalMoves) : 1f;
+        ApplyBurnAmount(Mathf.Max(IgniteStartAmount, progress));
+
+        if (MovesUntilBurnOut > 0) return false;
+
+        IsBurning = false;
+        if (burningOverlay != null) burningOverlay.SetActive(false);
+        return true;
+    }
+
+    /// <summary>Pushes _BurnAmount to spriteRenderer's material via a MaterialPropertyBlock
+    /// rather than touching spriteRenderer.material directly - avoids creating a unique material
+    /// instance per symbol (which would break SRP batching/GPU instancing across a whole board of
+    /// otherwise-identical symbols). No-op if spriteRenderer isn't assigned or isn't using the
+    /// SymbolBurning shader - other shaders simply won't have this property, which is harmless.</summary>
+    private void ApplyBurnAmount(float amount)
+    {
+        if (spriteRenderer == null) return;
+
+        burnPropertyBlock ??= new MaterialPropertyBlock();
+        spriteRenderer.GetPropertyBlock(burnPropertyBlock);
+        burnPropertyBlock.SetFloat(BurnAmountID, amount);
+        spriteRenderer.SetPropertyBlock(burnPropertyBlock);
+    }
+
     /// <summary>Marks this symbol as a Madness Symbol of the given definition. MovesSurvived starts at 0.
     /// Also applies the definition's immunity config (if any) - see MadnessSymbolDefinition.immunityMode.</summary>
     public void InitializeMadness(MadnessSymbolDefinition definition)
@@ -311,6 +393,176 @@ public class Symbol : MonoBehaviour
     {
         activeTween?.Kill();
         convertTween?.Kill();
+        danceTween?.Kill();
+    }
+
+    /// <summary>
+    /// Starts (or restarts) an idle "dance" that keeps swapping between distinct move mechanisms
+    /// rather than picking one style and looping it for the whole event - see DanceLoopRoutine/
+    /// BuildDanceMove for the full move set: a punch pulse, a wiggle, squash-and-stretch, a fast
+    /// shimmy, a smooth breathing pulse, a scale+rotation combo, a pendulum swing, a breakdance-
+    /// style spin flourish, a sharp tango accent-and-hold, and a barely-there low-amplitude "just
+    /// vibing" sway. Each move plays a handful of times (so it reads as a recognizable little
+    /// phrase, not a single twitch) before a fresh move is rolled - magnitude, cycle length,
+    /// vibrato, and repeat count are all rejittered every time, so even two symbols that land on
+    /// the same move back to back don't look identical, and no two symbols stay in sync with
+    /// each other.
+    ///
+    /// Deliberately stays off transform.position for every move (see BuildDanceMove) - a position
+    /// tween would fight MoveTo's own position tween since they'd both write transform.position
+    /// every frame, whereas scale/rotation are properties MoveTo never touches, which is the whole
+    /// reason this uses its own tween slot (danceTween) and coroutine (danceRoutine) in the first
+    /// place - so it can run alongside a gravity/swap MoveTo or a Madness convert highlight
+    /// without either killing the other. See Board.StartDiscoDance/StopDiscoDance and
+    /// SymbolSpawner's dance-for-new-spawns hook (DiscoDanceDiscoManager's event, including
+    /// symbols that spawn mid-event).
+    /// </summary>
+    public void PlayDanceLoop(float cycleDuration, float punchScaleAmount, float punchRotationDegrees)
+    {
+        StopDance(); // clears any previous loop/tween and resets scale/rotation first
+        danceRoutine = StartCoroutine(DanceLoopRoutine(cycleDuration, punchScaleAmount, punchRotationDegrees));
+    }
+
+    /// <summary>Stops PlayDanceLoop (kills the current move tween and the rerolling coroutine)
+    /// and snaps scale/rotation back to their resting values - a tween or Yoyo loop killed
+    /// mid-cycle can otherwise leave the transform slightly off from where it started.</summary>
+    public void StopDance()
+    {
+        if (danceRoutine != null)
+        {
+            StopCoroutine(danceRoutine);
+            danceRoutine = null;
+        }
+        danceTween?.Kill();
+        danceTween = null;
+        transform.localScale = Vector3.one;
+        transform.localRotation = Quaternion.identity;
+    }
+
+    private IEnumerator DanceLoopRoutine(float cycleDuration, float punchScaleAmount, float punchRotationDegrees)
+    {
+        while (true)
+        {
+            float jitteredCycle = Mathf.Max(0.05f, cycleDuration * Random.Range(0.8f, 1.2f));
+            float jitteredScale = punchScaleAmount * Random.Range(0.7f, 1.3f);
+            float jitteredRotation = punchRotationDegrees * Random.Range(0.7f, 1.3f) * (Random.value < 0.5f ? -1f : 1f);
+            int vibrato = Random.Range(1, 4);
+            float elasticity = Random.Range(0.3f, 0.7f);
+            int repeats = Random.Range(2, 5); // how many times THIS move plays before rerolling to a different one
+
+            danceTween = BuildDanceMove(Random.Range(0, DanceMoveCount), jitteredCycle, jitteredScale, jitteredRotation, vibrato, elasticity, repeats);
+            yield return danceTween.WaitForCompletion();
+
+            // Force back to a clean baseline between moves regardless of which mechanism just ran
+            // (a Yoyo-looped DOScale move ending state depends on its loop count parity) so the
+            // next move always starts from the same resting scale/rotation rather than drifting.
+            transform.localScale = Vector3.one;
+            transform.localRotation = Quaternion.identity;
+        }
+    }
+
+    private const int DanceMoveCount = 10;
+
+    /// <summary>Builds one dance move as its own (non-infinitely-looping) tween/sequence that
+    /// plays `repeats` times (or, for the swing/vibe moves below, an equivalent even Yoyo loop
+    /// count) and then completes, handing control back to DanceLoopRoutine to roll a fresh move.
+    /// Each case is a genuinely different mechanism, not just a magnitude/timing variation of the
+    /// same one - see PlayDanceLoop's doc for the reasoning on staying off transform.position.</summary>
+    private Tween BuildDanceMove(int moveIndex, float cycleDuration, float punchScale, float punchRotation,
+        int vibrato, float elasticity, int repeats)
+    {
+        switch (moveIndex)
+        {
+            case 0: // Punch pulse - a quick uniform scale snap, the "classic" punch feel
+                return transform.DOPunchScale(Vector3.one * Mathf.Max(0.01f, punchScale), cycleDuration, vibrato, elasticity)
+                    .SetLoops(repeats, LoopType.Restart);
+
+            case 1: // Wiggle - a rotation-only punch
+                return transform.DOPunchRotation(new Vector3(0f, 0f, punchRotation), cycleDuration, vibrato, elasticity)
+                    .SetLoops(repeats, LoopType.Restart);
+
+            case 2: // Squash & stretch - a jelly-bounce via non-uniform scale (wide+short, then
+                    // tall+thin), smoothly eased rather than a snap - a genuinely different feel
+                    // from the punch-based moves above.
+            {
+                float amt = Mathf.Clamp(Mathf.Abs(punchScale), 0.02f, 0.6f);
+                var stretched = new Vector3(1f - amt, 1f + amt, 1f);
+                return transform.DOScale(stretched, cycleDuration * 0.5f)
+                    .SetEase(Ease.InOutSine)
+                    .SetLoops(Mathf.Max(2, repeats * 2), LoopType.Yoyo);
+            }
+
+            case 3: // Shimmy - a fast, high-vibrato, low-elasticity rotation shake, distinctly
+                    // twitchier than Wiggle above rather than just a magnitude difference.
+                return transform.DOPunchRotation(new Vector3(0f, 0f, punchRotation * 0.6f), cycleDuration * 0.5f,
+                        vibrato: Random.Range(6, 10), elasticity: 0.15f)
+                    .SetLoops(repeats, LoopType.Restart);
+
+            case 4: // Breathing pulse - a slow, smooth scale in/out with no snap-back at all,
+                    // the calmest move in the set.
+                return transform.DOScale(Vector3.one * (1f + Mathf.Max(0.02f, punchScale) * 0.6f), cycleDuration * 0.6f)
+                    .SetEase(Ease.InOutSine)
+                    .SetLoops(Mathf.Max(2, repeats * 2), LoopType.Yoyo);
+
+            case 5: // Combo - scale and rotation punches together, both at full jittered magnitude
+            {
+                var seq = DOTween.Sequence();
+                seq.Join(transform.DOPunchScale(Vector3.one * Mathf.Max(0.01f, punchScale), cycleDuration, vibrato, elasticity));
+                seq.Join(transform.DOPunchRotation(new Vector3(0f, 0f, punchRotation), cycleDuration, vibrato, elasticity));
+                seq.SetLoops(repeats, LoopType.Restart);
+                return seq;
+            }
+
+            case 6: // Swing - a smooth pendulum sway between two angles, wider and slower than
+                    // Wiggle's snap-and-settle punch - reads as a continuous back-and-forth rather
+                    // than a twitch. Starts from one extreme so the Yoyo genuinely swings both ways.
+            {
+                float swingAngle = Mathf.Max(10f, Mathf.Abs(punchRotation) * 1.5f);
+                transform.localRotation = Quaternion.Euler(0f, 0f, -swingAngle);
+                return transform.DORotate(new Vector3(0f, 0f, swingAngle), cycleDuration * 0.7f)
+                    .SetEase(Ease.InOutSine)
+                    .SetLoops(Mathf.Max(2, repeats * 2), LoopType.Yoyo);
+            }
+
+            case 7: // Breakdance flourish - a full spin (either direction) with a punchy scale pop
+                    // riding alongside it, energetic and a little chaotic. FastBeyond360 lets
+                    // DORotate actually complete a full 360 rather than snapping back the "short way".
+            {
+                float spinDir = Random.value < 0.5f ? 1f : -1f;
+                var seq = DOTween.Sequence();
+                seq.Join(transform.DORotate(new Vector3(0f, 0f, 360f * spinDir), cycleDuration * 0.8f, RotateMode.FastBeyond360)
+                    .SetEase(Ease.InOutQuad));
+                seq.Join(transform.DOPunchScale(Vector3.one * Mathf.Max(0.05f, punchScale) * 1.4f, cycleDuration * 0.8f,
+                    Mathf.Max(vibrato, 2), 0.3f));
+                seq.SetLoops(repeats, LoopType.Restart);
+                return seq;
+            }
+
+            case 8: // Tango - a sharp, dramatic accent: snap to an angle with a matching stretch,
+                    // hold the pose a beat, then ease back - distinctly more "posed" than any of
+                    // the continuously-looping moves above.
+            {
+                float tangoAngle = Mathf.Max(10f, Mathf.Abs(punchRotation) * 2f) * (Random.value < 0.5f ? 1f : -1f);
+                var seq = DOTween.Sequence();
+                seq.Append(transform.DORotate(new Vector3(0f, 0f, tangoAngle), cycleDuration * 0.25f).SetEase(Ease.OutQuad));
+                seq.Join(transform.DOScale(Vector3.one * (1f + Mathf.Max(0.02f, punchScale) * 0.5f), cycleDuration * 0.25f).SetEase(Ease.OutQuad));
+                seq.AppendInterval(cycleDuration * 0.25f); // the dramatic hold
+                seq.Append(transform.DORotate(Vector3.zero, cycleDuration * 0.25f).SetEase(Ease.InOutSine));
+                seq.Join(transform.DOScale(Vector3.one, cycleDuration * 0.25f).SetEase(Ease.InOutSine));
+                seq.SetLoops(repeats, LoopType.Restart);
+                return seq;
+            }
+
+            default: // Just vibing - minimal, low-amplitude, unhurried sway - barely there
+                    // compared to everything else in the set, on purpose.
+            {
+                float vibeAngle = Mathf.Clamp(Mathf.Abs(punchRotation) * 0.3f, 2f, 6f);
+                transform.localRotation = Quaternion.Euler(0f, 0f, -vibeAngle);
+                return transform.DORotate(new Vector3(0f, 0f, vibeAngle), cycleDuration * 1.5f)
+                    .SetEase(Ease.InOutSine)
+                    .SetLoops(Mathf.Max(2, repeats), LoopType.Yoyo);
+            }
+        }
     }
 
     private Vector3 pressWorldPosition;

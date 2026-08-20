@@ -12,7 +12,6 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 32a9b4d990aa88c44b3d7bb7744a4fed, type: 3}
   m_Name: MadnessIgniteColor
   m_EditorClassIdentifier: Assembly-CSharp::MadnessIgniteColorEffect
-  targetColor: 0
   durationMoves: 5
   scoreMultiplierBonus: 0.5
   damagePerMatch: 1

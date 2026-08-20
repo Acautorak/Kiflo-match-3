@@ -47,6 +47,7 @@ public class PlayerRunStatsSaveData
     /// bonusGraceMoves above, which belongs to the older, separate stage-clear grace period.</summary>
     public float graceMoveChanceBonus;
     public ColorBonusSaveData[] colorBonuses;
+    public float igniteOnMatchChanceBonus;
 }
 
 [Serializable]

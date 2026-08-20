@@ -1,4 +1,4 @@
-2026-08-08 16:42:56
+2026-08-20 01:10:00
 052faaac586de48259a63d0c4782560b|Assets/InputSystem_Actions.inputactions
 25fc99da23bc3ce4e88a31707febf6c3|Assets/Prefabs/LuckyTicket/Damage.asset
 f20dc917bdb85ec4db53f875c67058e0|Assets/Prefabs/LuckyTicket/HealReward.asset
@@ -8,6 +8,7 @@ aaf4a03a8d499f249af013bc07dae946|Assets/Prefabs/Madness/ColorConvertKebab.asset
 b763b2e55a431e94c90c87c78ca9760d|Assets/Prefabs/Madness/EvilKebab.asset
 dba6bc74f8e34bc48ac1327a6f5e55fa|Assets/Prefabs/Madness/GoldenChest.asset
 671885453ccec2745a592e7c39f560e8|Assets/Prefabs/Madness/HealJelly.asset
+4d1aafef9b4e2704f9cb8f1387c0c2ec|Assets/Prefabs/Madness/IgniteAllAround.asset
 1f69d3e763bd7594b8a60c61f2e410f9|Assets/Prefabs/Tutorial/MadnessSymbolStep.asset
 329556056d5597c4392dc47c71efca67|Assets/Prefabs/Tutorial/MadnessSymbolStep2 1.asset
 389c085295f339b479ef35d33caef6a0|Assets/Prefabs/Tutorial/MadnessSymbolStep2.asset
@@ -30,6 +31,7 @@ d41653a46216b7742b805bb977594316|Assets/Prefabs/Tutorial/TutorialStep.asset
 bdb355f6ec0f89649a8747d8b1faeccc|Assets/Scripts/Powerups/Green/GreenHealAmount.asset
 37a6349efe09ef8488c78cd0dfdd579c|Assets/Scripts/Powerups/Green/GreenHealChance.asset
 7c2528d4909f6da4d8223ba7b553778e|Assets/Scripts/Powerups/Heal.asset
+e8a263fbdd351ef40bca5901aa9298d8|Assets/Scripts/Powerups/IgniteChance.asset
 cec10c38c9cab6c4c8169fe38b06e9b4|Assets/Scripts/Powerups/LockChance.asset
 ea0a028671e9c66448ba0d2c640d63c9|Assets/Scripts/Powerups/MaxHealth.asset
 665012a98d692d24da87b4b046faab79|Assets/Scripts/Powerups/Purple/PurpleHealAmount.asset

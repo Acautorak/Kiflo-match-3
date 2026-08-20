@@ -15,6 +15,13 @@ public class ScoreTracker
 
     public int CurrentScore { get; private set; }
 
+    /// <summary>Multiplies every AddScore call on top of PlayerRunStats.ScoreMultiplier - unlike
+    /// that field (permanent, powerup-accumulated), this is meant for short-lived board-wide
+    /// events like Disco Dance Disco (see DiscoDanceDiscoManager/Board.ScoreEventMultiplier) that
+    /// need to boost scoring for a fixed duration and then cleanly revert, without touching or
+    /// permanently drifting the run's actual accumulated multiplier. 1 = no effect (default).</summary>
+    public float EventMultiplier { get; set; } = 1f;
+
     public ScoreTracker(PlayerRunStats runStats)
     {
         this.runStats = runStats;
@@ -28,7 +35,8 @@ public class ScoreTracker
     public void AddScore(int rawDelta)
     {
         if (rawDelta == 0) return;
-        int delta = runStats != null ? Mathf.RoundToInt(rawDelta * runStats.ScoreMultiplier) : rawDelta;
+        float multiplier = (runStats != null ? runStats.ScoreMultiplier : 1f) * EventMultiplier;
+        int delta = Mathf.RoundToInt(rawDelta * multiplier);
         CurrentScore += delta;
         EventBus.Publish(new ScoreChangedEvent(CurrentScore, delta));
     }

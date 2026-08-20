@@ -107,6 +107,20 @@ public class Board : MonoBehaviour
              "the board populates. Ignored when loading from an existing save (lock state persists there).")]
     [SerializeField] private InitialLockPlacement[] initialLockPlacements;
 
+    [Header("Burning Status Effect")]
+    [Tooltip("How many accepted player moves an ignited tile burns for before it's auto-collected. See BurningSystem/PlayerRunStats.IgniteOnMatchChance.")]
+    [Min(1)] [SerializeField] private int burnDurationMoves = 3;
+    [Tooltip("Score awarded when a burnt-out tile is auto-collected - same idea as Tile Collector's Score Per Tile.")]
+    [Min(0)] [SerializeField] private int scorePerBurntTile = 15;
+    [Tooltip("Optional - a prefab that visibly flies from the matched tile to the tile it's about to ignite, catching fire only on arrival. Leave unassigned to ignite instantly with no travel visual.")]
+    [SerializeField] private GameObject burningSparkPrefab;
+    [Tooltip("Parent transform for spawned sparks. Falls back to this Board's own transform if left unassigned.")]
+    [SerializeField] private Transform burningSparkParent;
+    [Tooltip("How long (seconds) a spark takes to travel from the matched tile to its ignite target. Only matters if Burning Spark Prefab is assigned.")]
+    [Min(0.05f)] [SerializeField] private float burningSparkFlightDuration = 0.35f;
+    [Tooltip("How far (world units) the spark's flight path bows away from a straight line - 0 flies straight, higher arcs more. Bows to a random side each flight. Only matters if Burning Spark Prefab is assigned.")]
+    [Min(0f)] [SerializeField] private float burningSparkArcHeight = 0.75f;
+
     [Header("Locking / Freezing - Auto Spawn On Refill (optional)")]
     [Tooltip("If true, newly refilled tiles have a chance to spawn already locked, picked from Lock Spawn Options below.")]
     [SerializeField] private bool spawnLocksOnRefill = false;
@@ -157,6 +171,7 @@ public class Board : MonoBehaviour
     private SymbolSpawner symbolSpawner;
     private ScoreTracker scoreTracker;
     private LockingSystem lockingSystem;
+    private BurningSystem burningSystem;
     private MadnessSystem madnessSystem;
     private GravityController gravityController;
     private SpecialEffectSystem specialEffectSystem;
@@ -225,6 +240,15 @@ public class Board : MonoBehaviour
         };
         gravityController = new GravityController(grid, symbolSpawner, lockingSystem, madnessSystem, fallDuration, GridToWorld);
         specialEffectSystem = new SpecialEffectSystem(grid);
+        burningSystem = new BurningSystem(grid, symbolSpawner, this, playerRunStats)
+        {
+            BurnDurationMoves = burnDurationMoves,
+            ScorePerBurntTile = scorePerBurntTile,
+            SparkPrefab = burningSparkPrefab,
+            SparkParent = burningSparkParent,
+            SparkFlightDuration = burningSparkFlightDuration,
+            SparkArcHeight = burningSparkArcHeight
+        };
         saveIO = new BoardSaveIO(grid, symbolSpawner, scoreTracker, playerHealth, playerRunStats, stageManager, GridToWorld);
         swapController = new SwapController(grid, GridToWorld, swapDuration,
             () => IsGameBusy,
@@ -232,7 +256,7 @@ public class Board : MonoBehaviour
             () => lockingSystem.AllowSwappingLockedTiles,
             (a, b) => StartCoroutine(TrySwap(a, b)));
 
-        matchResolver = new MatchResolver(grid, gravityController, specialEffectSystem, madnessSystem, lockingSystem,
+        matchResolver = new MatchResolver(grid, gravityController, specialEffectSystem, madnessSystem, lockingSystem, burningSystem,
             scoreTracker, symbolSpawner, playerHealth, playerRunStats, madnessBoardModifiers, gameManager, GridToWorld,
             ShouldSkipRefillGeneration, () => isStageClearing, () => stageClearGraceActive,
             () => stageClearGraceMovesRemaining, () => stageClearGraceRandomSpecialChance)
@@ -339,6 +363,17 @@ public class Board : MonoBehaviour
     /// See BoardSaveIO for why this guard exists.</summary>
     private bool IsSafeToSave() => !isStageClearing && !stageClearPendingAfterResolution;
 
+    /// <summary>
+    /// Sets the grid's active-cell mask without touching occupants or triggering a repopulate -
+    /// for the save-resume path, where StageManager needs the mask in place BEFORE
+    /// InitializeBoard()/BoardSaveIO.LoadFromSave spawns symbols back in, so gravity treats
+    /// holes correctly from the first move onward. (ResetForStage is the fresh-stage equivalent;
+    /// it clears+repopulates too, which isn't wanted here since LoadFromSave does that itself
+    /// from the save data.) Null/empty shape resets to a full rectangle.
+    /// </summary>
+    public void ApplyBoardShape(BoardShapeData shape) =>
+        grid.ApplyShape(shape != null && !shape.IsEmpty ? shape.ToMask2D() : null);
+
     #region Setup
 
     private void PopulateBoard(InitialLockPlacement[] overrideLockPlacements = null)
@@ -348,6 +383,8 @@ public class Board : MonoBehaviour
         {
             for (int y = 0; y < height; y++)
             {
+                if (!grid.IsActive(x, y)) continue; // hole - part of the stage's shape, stays permanently empty
+
                 SymbolType type;
                 do { type = symbolSpawner.RandomType(); }
                 while (symbolSpawner.CreatesImmediateMatch(x, y, type));
@@ -355,7 +392,7 @@ public class Board : MonoBehaviour
                 if (symbolSpawner.Spawn(x, y, type, SpecialType.None, GridToWorld(x, y)) != null) spawned++;
             }
         }
-        Debug.Log($"[Board] PopulateBoard finished - spawned {spawned}/{width * height} symbols");
+        Debug.Log($"[Board] PopulateBoard finished - spawned {spawned}/{grid.ActiveCellCount} active cells (board {width}x{height})");
 
         lockingSystem.ApplyInitialLockPlacements(overrideLockPlacements);
     }
@@ -372,10 +409,23 @@ public class Board : MonoBehaviour
         madnessBoardModifiers?.Clear();
     }
 
-    public void ResetForStage(StageDefinition stage, InitialLockPlacement[] proceduralLockPlacements = null)
+    /// <param name="proceduralShape">
+    /// When provided (typically ProceduralStageGenerator.GenerateShape's output), this overrides
+    /// stage.shape - same relationship proceduralLockPlacements has with stage.initialLockPlacements.
+    /// If both are null/empty, the board is a full rectangle - the existing behavior for every
+    /// stage that predates shape support.
+    /// </param>
+    public void ResetForStage(StageDefinition stage, InitialLockPlacement[] proceduralLockPlacements = null,
+        BoardShapeData proceduralShape = null)
     {
         ClearBoard();
         ApplyStageRules(stage);
+
+        var shapeSource = proceduralShape != null && !proceduralShape.IsEmpty
+            ? proceduralShape
+            : stage != null ? stage.shape : null;
+        grid.ApplyShape(shapeSource != null && !shapeSource.IsEmpty ? shapeSource.ToMask2D() : null);
+
         PopulateBoard(proceduralLockPlacements);
         hasLoadedSavedState = false;
         SaveNow();
@@ -453,6 +503,7 @@ public class Board : MonoBehaviour
         lockingSystem.SpawnLocksOnRefill = stage.spawnLocksOnRefill;
         lockingSystem.DestroySymbolWhenUnlocked = stage.destroySymbolWhenUnlocked;
         lockingSystem.LockedTilesFallWithGravity = stage.lockedTilesFallWithGravity;
+        gravityController.HolesBlockGravity = stage.holesBlockGravity;
         lockingSystem.FrozenTileSpawnMode = stage.frozenTileSpawnMode;
         lockingSystem.FrozenTileBottomRowCount = stage.frozenTileBottomRowCount;
         matchResolver.MaxConsecutiveRandomTriggers = stage.maxConsecutiveRandomTriggers;
@@ -478,6 +529,12 @@ public class Board : MonoBehaviour
     public List<Vector2Int> ConvertRandomSymbols(SymbolType? fromColor, SymbolType toColor, int count, Vector2Int? excludePosition = null) =>
         madnessSystem.ConvertRandomSymbols(fromColor, toColor, count, excludePosition);
 
+    /// <summary>Guaranteed-ignites every eligible tile around `center` (see BurningSystem.
+    /// IgniteAllNeighbors) - for a Madness Symbol effect that lights everything around it ablaze
+    /// on death (see MadnessIgniteAllNeighborsEffect). No-op if BurningSystem hasn't been
+    /// constructed yet (shouldn't happen once Board.Awake finishes).</summary>
+    public void IgniteAllNeighbors(Vector2Int center) => burningSystem?.IgniteAllNeighbors(center);
+
     public List<Vector2Int> RandomizeSymbolColors(int count, Vector2Int? excludePosition = null, bool guaranteeColorChange = true) =>
         madnessSystem.RandomizeSymbolColors(count, excludePosition, guaranteeColorChange);
 
@@ -500,6 +557,40 @@ public class Board : MonoBehaviour
     {
         get => freeSpinsController != null ? freeSpinsController.GuaranteedWonkyChainThreshold : 0;
         set { if (freeSpinsController != null) freeSpinsController.GuaranteedWonkyChainThreshold = value; }
+    }
+
+    /// <summary>Forwards to ScoreTracker.EventMultiplier (see its doc) - lets a short-lived
+    /// board-wide event like Disco Dance Disco boost every AddScore call for its duration without
+    /// touching PlayerRunStats.ScoreMultiplier. 1 = no effect; DiscoDanceDiscoManager is
+    /// responsible for setting this back to 1 once its event ends.</summary>
+    public float ScoreEventMultiplier
+    {
+        get => scoreTracker != null ? scoreTracker.EventMultiplier : 1f;
+        set { if (scoreTracker != null) scoreTracker.EventMultiplier = Mathf.Max(0f, value); }
+    }
+
+    /// <summary>Starts every currently-occupied cell's Symbol.PlayDanceLoop (see Disco Dance
+    /// Disco / DiscoDanceDiscoManager) - purely cosmetic, doesn't touch grid state. Symbols that
+    /// spawn AFTER this call (e.g. a refill mid-event) don't automatically join the dance - only
+    /// what's on the board at the moment this is called.</summary>
+    public void StartDiscoDance(float cycleDuration, float punchScaleAmount, float punchRotationDegrees)
+    {
+        for (int x = 0; x < width; x++)
+            for (int y = 0; y < height; y++)
+                grid[x, y].Occupant?.PlayDanceLoop(cycleDuration, punchScaleAmount, punchRotationDegrees);
+
+        symbolSpawner?.SetDanceForNewSpawns(true, cycleDuration, punchScaleAmount, punchRotationDegrees);
+    }
+
+    /// <summary>Stops every currently-occupied cell's dance loop (see StartDiscoDance) and snaps
+    /// scale/rotation back to resting, and stops applying the dance to newly-spawned symbols too.</summary>
+    public void StopDiscoDance()
+    {
+        for (int x = 0; x < width; x++)
+            for (int y = 0; y < height; y++)
+                grid[x, y].Occupant?.StopDance();
+
+        symbolSpawner?.SetDanceForNewSpawns(false);
     }
 
     /// <summary>Entry point for TileCollectorManager - runs one timed Tile Collector session on
@@ -573,17 +664,21 @@ public class Board : MonoBehaviour
         yield return matchResolver.TryRandomSpecialOnGraceMove();
 
         // This swap counts as an accepted player move - every Temporary lock on the board
-        // melts one layer, regardless of whether it was actually matched.
-        if (lockingSystem.MeltAllTemporaryLocks())
+        // melts one layer, and every burning tile's countdown ticks down, regardless of whether
+        // this move itself was actually matched.
+        bool locksDestroyedThisMove = lockingSystem.MeltAllTemporaryLocks();
+        bool tilesBurntOutThisMove = burningSystem.TickAllBurningTiles();
+
+        if (locksDestroyedThisMove || tilesBurntOutThisMove)
         {
             if (ShouldSkipRefillGeneration() || stageClearPendingAfterResolution)
             {
-                matchGroups = MatchFinder.FindMatchGroups(grid.RawGrid, width, height, madnessSystem.TreatMadnessSymbolsAsWildcards); // melting can reveal new matches
+                matchGroups = MatchFinder.FindMatchGroups(grid.RawGrid, width, height, madnessSystem.TreatMadnessSymbolsAsWildcards); // melting/burning can reveal new matches
             }
             else
             {
                 yield return gravityController.Collapse();
-                matchGroups = MatchFinder.FindMatchGroups(grid.RawGrid, width, height, madnessSystem.TreatMadnessSymbolsAsWildcards); // melting can reveal new matches
+                matchGroups = MatchFinder.FindMatchGroups(grid.RawGrid, width, height, madnessSystem.TreatMadnessSymbolsAsWildcards); // melting/burning can reveal new matches
             }
         }
 
@@ -682,8 +777,6 @@ public class Board : MonoBehaviour
                     remaining.Add(occ);
             }
 
-        Sequence lastPopSequence = null;
-
         for (int i = 0; i < remaining.Count; i++)
         {
             var symbol = remaining[i];
@@ -695,7 +788,7 @@ public class Board : MonoBehaviour
 
             // Was two independent DOScale calls on the same transform (fighting each other
             // instead of actually popping) - Append them into a real grow-then-shrink sequence.
-            lastPopSequence = DOTween.Sequence()
+            DOTween.Sequence()
                 .Append(symbol.transform.DOScale(0.15f, 0.1f).SetEase(Ease.InBack))
                 .Append(symbol.transform.DOScale(0f, 0.1f).SetEase(Ease.InBack))
                 .OnComplete(() => Destroy(symbol.gameObject));
@@ -708,14 +801,6 @@ public class Board : MonoBehaviour
             if (!isLastInBoard && isWaveBoundary)
                 yield return new WaitForSeconds(stageClearExplosionWaveDelay);
         }
-
-        // Wait for the very last wave's pop tween to actually finish (previously the coroutine
-        // fell straight through to onComplete the instant the last wave's tweens were kicked off,
-        // so the powerup screen/StageCompletedEvent could arrive while the last symbols were still
-        // visibly mid-pop) - only the LAST tween needs waiting on since every earlier wave already
-        // ran its full duration during the per-wave delay above.
-        if (lastPopSequence != null)
-            yield return lastPopSequence.WaitForCompletion();
 
         isBusy = false;
         isStageClearing = false;

@@ -18,6 +18,11 @@ public class PowerupDefinition : ScriptableObject
     [Header("Effect - leave any at 0/default to skip it")]
     [Tooltip("Added to PlayerRunStats.RandomSpecialChanceBonus (boosts the gravity-bonus and grace-period special chance).")]
     public float randomSpecialChanceBonus;
+    [Tooltip("Added to PlayerRunStats.IgniteOnMatchChance (0-1 fraction) - the chance, rolled once " +
+             "per matched group, that 1 random unburning/unlocked tile adjacent to the match " +
+             "ignites and starts burning down. Baseline 0, so this is what gives the player any " +
+             "chance at all. See BurningSystem.")]
+    [Range(0f, 1f)] public float igniteOnMatchChanceBonus;
     [Tooltip("Added to PlayerRunStats.LockChanceReduction (reduces lock/freeze spawn chance).")]
     public float lockChanceReduction;
     [Tooltip("Added to PlayerRunStats.ScoreMultiplier (e.g. 0.1 = +10% score for the rest of the run).")]
@@ -64,6 +69,7 @@ public class PowerupDefinition : ScriptableObject
         if (stats != null)
         {
             stats.AddRandomSpecialChanceBonus(randomSpecialChanceBonus);
+            stats.AddIgniteChanceBonus(igniteOnMatchChanceBonus);
             stats.AddLockChanceReduction(lockChanceReduction);
             stats.AddScoreMultiplier(scoreMultiplierBonus);
             stats.AddBonusGraceMoves(bonusGraceMoves);

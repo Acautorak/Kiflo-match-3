@@ -93,6 +93,19 @@ public class StageGenerationConfig : ScriptableObject
     };
     public IntRange frozenTileBottomRowCount = new IntRange { min = 1, max = 3 };
 
+    [Header("Board Shapes")]
+    [Tooltip("Stage depth at which a non-rectangular board shape can first be picked for a stage. " +
+             "Below this depth (and whenever shapeTemplates is empty), every generated stage is a " +
+             "full rectangle - same 'gated by depth' pattern as frozen tiles and locks-on-refill above.")]
+    [Min(0)] public int shapesUnlockDepth = 20;
+    [Tooltip("Weighted pool of hand-authored shape templates (holes, silhouettes, jagged edges) " +
+             "the generator draws from - see ProceduralStageGenerator.GenerateShape. Each template " +
+             "is centered and cropped/padded to fit the board's actual width/height, then validated " +
+             "(no all-hole columns, no unreachable pocket under 3 cells) before use, so templates " +
+             "authored at one board size are safe to reuse across others. Leave empty to disable " +
+             "shapes entirely regardless of shapesUnlockDepth.")]
+    public ShapeTemplate[] shapeTemplates;
+
     [Header("Madness Feature Mode")]
     [Tooltip("Which feature mode a stage's Madness meter fill requests when it fills, weighted the " +
              "same way as Goal above - e.g. weight Free Spins higher on stages where you want more " +
@@ -107,6 +120,10 @@ public class StageGenerationConfig : ScriptableObject
 
     [Header("Rules (fixed - not scaled by difficulty)")]
     public bool allowNonMatchingSwaps = true;
+    [Tooltip("Whether a generated stage's holes (if it has any - see Board Shapes above) block " +
+             "gravity or let it pass through. See StageDefinition.holesBlockGravity / " +
+             "GravityController.HolesBlockGravity for what this actually changes.")]
+    public bool holesBlockGravity = true;
 }
 
 [System.Serializable]

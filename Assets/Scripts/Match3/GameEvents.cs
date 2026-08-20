@@ -290,6 +290,22 @@ public readonly struct SymbolsRandomizedEvent
 }
 
 /// <summary>
+/// Fired when a tile is set alight (see BurningSystem.TryIgniteNearby) - UI/VFX can hook this to
+/// play an ignite flourish. Not fired again while it's already burning (re-ignition isn't
+/// possible - BurningSystem skips already-burning tiles when picking an ignite target).
+/// </summary>
+public readonly struct TileIgnitedEvent
+{
+    public readonly Vector2Int Position;
+    public readonly int MovesUntilBurnOut;
+    public TileIgnitedEvent(Vector2Int position, int movesUntilBurnOut)
+    {
+        Position = position;
+        MovesUntilBurnOut = movesUntilBurnOut;
+    }
+}
+
+/// <summary>
 /// Fired when a Madness Symbol is created on the board via refill spawn (see
 /// GravityController.Collapse). Distinct from MadnessSymbolClearedEvent - this is the "it just
 /// appeared" moment, useful for tutorials/VFX that want to react the first time a particular

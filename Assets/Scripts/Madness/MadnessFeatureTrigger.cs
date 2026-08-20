@@ -216,6 +216,8 @@ public class MadnessFeatureTrigger : MonoBehaviour
         if (featureId == LuckyScratchTicketManager.FeatureId) return MadnessFeatureModeChoice.LuckyScratchTicket;
         if (featureId == TileCollectorManager.FeatureId) return MadnessFeatureModeChoice.TileCollector;
         if (featureId == KebabKarnageManager.FeatureId) return MadnessFeatureModeChoice.KebabKarnage;
+        if (featureId == DiscoDanceDiscoManager.FeatureId) return MadnessFeatureModeChoice.DiscoDanceDisco;
+        if (featureId == CookieSmashManager.FeatureId) return MadnessFeatureModeChoice.CookieSmash;
         return null;
     }
 
@@ -228,6 +230,8 @@ public class MadnessFeatureTrigger : MonoBehaviour
         MadnessFeatureModeChoice.FreeSpins => FreeSpinsManager.FeatureId,
         MadnessFeatureModeChoice.LuckyScratchTicket => LuckyScratchTicketManager.FeatureId,
         MadnessFeatureModeChoice.TileCollector => TileCollectorManager.FeatureId,
+        MadnessFeatureModeChoice.DiscoDanceDisco => DiscoDanceDiscoManager.FeatureId,
+        MadnessFeatureModeChoice.CookieSmash => CookieSmashManager.FeatureId,
         _ => KebabKarnageManager.FeatureId,
     };
 

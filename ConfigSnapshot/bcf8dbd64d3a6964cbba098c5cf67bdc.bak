@@ -102,6 +102,26 @@ MonoBehaviour:
   frozenTileBottomRowCount:
     min: 1
     max: 3
+  shapesUnlockDepth: 0
+  shapeTemplates:
+  - name: rtest
+    shape:
+      width: 7
+      height: 10
+      mask: 00000000000000010101000101010101010101010101010101010101010101010101010101010101010101010101010101010001010101010101010100000000000000010101
+    weight: 1
+  - name: twe2
+    shape:
+      width: 7
+      height: 10
+      mask: 01010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101
+    weight: 4
+  - name: 3
+    shape:
+      width: 7
+      height: 10
+      mask: 00000101000001010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010100000101000001010101
+    weight: 1
   featureModeWeights:
   - mode: 0
     weight: 1
@@ -111,4 +131,7 @@ MonoBehaviour:
     weight: 1
   - mode: 3
     weight: 1
+  - mode: 4
+    weight: 1
   allowNonMatchingSwaps: 1
+  holesBlockGravity: 0

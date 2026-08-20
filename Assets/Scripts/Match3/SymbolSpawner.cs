@@ -27,6 +27,26 @@ public class SymbolSpawner
     // existing call site that still calls Object.Destroy directly is completely unaffected.
     private readonly Dictionary<SymbolType, Queue<Symbol>> pool = new Dictionary<SymbolType, Queue<Symbol>>();
 
+    // Set/cleared by Board.StartDiscoDance/StopDiscoDance (DiscoDanceDiscoManager's event) -
+    // when active, every Spawn() below (fresh Instantiate OR a pooled reuse) starts dancing
+    // immediately, so mid-event refills (gravity, cascades, Free Spins reel ticks, Tile Collector
+    // taps) join in instead of sitting still next to symbols that were already dancing when the
+    // event started. See Symbol.PlayDanceLoop.
+    private bool danceActiveForNewSpawns;
+    private float danceCycleDuration;
+    private float dancePunchScale;
+    private float dancePunchRotationDegrees;
+
+    /// <summary>Toggles the dance-on-spawn behavior described above. Passing active=false ignores
+    /// the remaining parameters (existing behavior for callers that just want it off).</summary>
+    public void SetDanceForNewSpawns(bool active, float cycleDuration = 0f, float punchScale = 0f, float punchRotationDegrees = 0f)
+    {
+        danceActiveForNewSpawns = active;
+        danceCycleDuration = cycleDuration;
+        dancePunchScale = punchScale;
+        dancePunchRotationDegrees = punchRotationDegrees;
+    }
+
     public SymbolSpawner(GridModel grid, Symbol symbolPrefab, Symbol[] symbolPrefabs, Transform symbolParent)
     {
         this.grid = grid;
@@ -109,6 +129,9 @@ public class SymbolSpawner
         if (lockLayers > 0 && lockBehavior != LockBehavior.None)
             instance.SetLock(lockLayers, lockBehavior, movesPerLayer);
 
+        if (danceActiveForNewSpawns)
+            instance.PlayDanceLoop(danceCycleDuration, dancePunchScale, dancePunchRotationDegrees);
+
         grid[x, y].Occupant = instance;
         return instance;
     }
@@ -124,6 +147,18 @@ public class SymbolSpawner
     public void Despawn(Symbol instance)
     {
         if (instance == null) return;
+
+        // Kill any looping Disco Dance Disco animation before pooling - DOTween generally no-ops
+        // on an inactive target, but without this the tween keeps "running" against a disabled
+        // object indefinitely (never cleaned up by StopDiscoDance, which only reaches symbols
+        // still occupying a grid cell) and the punch tween's resting offset can otherwise get
+        // baked into scale/rotation for whatever reuses this instance next. See Symbol.StopDance.
+        instance.StopDance();
+        // Put out any burn in progress too, for the same reason - without this a pooled instance
+        // could come back out of Spawn() already "on fire" from its previous life, with a stale
+        // overlay/countdown that has nothing to do with whatever ignites it this time (if
+        // anything). BurningSystem decides fresh whether/when to ignite a newly-spawned instance.
+        instance.SetBurning(0);
 
         instance.gameObject.SetActive(false);
 

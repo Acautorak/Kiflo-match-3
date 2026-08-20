@@ -27,6 +27,7 @@ public class StageManager : MonoBehaviour
 
     private readonly List<StageDefinition> generatedStages = new List<StageDefinition>();
     private readonly List<InitialLockPlacement[]> generatedLockPlacements = new List<InitialLockPlacement[]>();
+    private readonly List<BoardShapeData> generatedShapes = new List<BoardShapeData>();
 
     private int currentStageIndex = -1;
     private StageDefinition currentStage;
@@ -149,8 +150,18 @@ public class StageManager : MonoBehaviour
             Debug.Log($"[StageManager] Restored saved stage {currentStageIndex + 1}: {currentStage?.name}");
 
             // Board.Start() defers to us when a StageManager is present (see Board.cs) - this
-            // is the point where we tell it to actually load its saved grid state.
-            if (board != null) board.InitializeBoard();
+            // is the point where we tell it to actually load its saved grid state. The shape
+            // must be applied BEFORE InitializeBoard() populates cells from the save: the save
+            // data itself never places a symbol in a hole (PopulateBoard/GravityController
+            // already skip inactive cells before a save is ever written), so visuals come back
+            // correct either way - but without this, GridModel's active mask stays "full
+            // rectangle" and GravityController would treat what should be disconnected segments
+            // as one tall column, misbehaving on the very next match.
+            if (board != null)
+            {
+                board.ApplyBoardShape(GetShape(currentStageIndex));
+                board.InitializeBoard();
+            }
             return;
         }
 
@@ -177,6 +188,14 @@ public class StageManager : MonoBehaviour
         return (index >= 0 && index < generatedLockPlacements.Count) ? generatedLockPlacements[index] : null;
     }
 
+    /// <summary>The generated (or null = full rectangle) shape for a given depth - see
+    /// ProceduralStageGenerator.GenerateShape. Cached the same way stages/locks are.</summary>
+    private BoardShapeData GetShape(int index)
+    {
+        EnsureGenerated(index);
+        return (index >= 0 && index < generatedShapes.Count) ? generatedShapes[index] : null;
+    }
+
     /// <summary>
     /// Generates every stage up to and including `index` that isn't cached yet. Stages are
     /// generated once and cached (not regenerated each visit) so re-entering an earlier stage
@@ -192,9 +211,15 @@ public class StageManager : MonoBehaviour
         while (generatedStages.Count <= index)
         {
             int depth = generatedStages.Count;
+
+            // Shape first - lock placement generation takes the resulting mask so locks never
+            // land on a hole (see GenerateInitialLockPlacements' shapeMask param).
+            var shape = ProceduralStageGenerator.GenerateShape(depth, runSeed, generationConfig, boardWidth, boardHeight);
+            generatedShapes.Add(shape);
+
             generatedStages.Add(ProceduralStageGenerator.GenerateStage(depth, runSeed, generationConfig));
             generatedLockPlacements.Add(ProceduralStageGenerator.GenerateInitialLockPlacements(
-                depth, runSeed, generationConfig, boardWidth, boardHeight));
+                depth, runSeed, generationConfig, boardWidth, boardHeight, shape?.ToMask2D()));
         }
     }
 
@@ -274,7 +299,7 @@ public class StageManager : MonoBehaviour
             gameManager.SetState(GameManager.GameplayState.Idle);
 
         if (board != null)
-            board.ResetForStage(currentStage, GetLockPlacements(index));
+            board.ResetForStage(currentStage, GetLockPlacements(index), GetShape(index));
 
         EventBus.Publish(new StageStartedEvent(currentStageIndex, currentStage));
         Debug.Log($"[StageManager] Started stage {currentStageIndex + 1}: {currentStage?.name}");
@@ -402,13 +427,21 @@ public class StageManager : MonoBehaviour
         var targets = currentStage.collectTargets;
         if (targets == null || collectProgressByTarget == null) return;
 
+        // Disco Dance Disco (see DiscoDanceDiscoManager) counts each matched symbol multiple
+        // times toward a Collect goal while its event is active - 1 the rest of the time. Read
+        // directly off the singleton (same pattern as Board.Instance elsewhere) rather than an
+        // event, since this needs the current value at the moment of each match, not a cached one.
+        int perMatchAmount = DiscoDanceDiscoManager.Instance != null ? DiscoDanceDiscoManager.Instance.CollectMultiplier : 1;
+
         bool changed = false;
         for (int i = 0; i < targets.Length; i++)
         {
             if (targets[i].symbolType != evt.Type) continue;
             if (collectProgressByTarget[i] >= targets[i].count) continue;
 
-            collectProgressByTarget[i]++;
+            // Clamp to the target's count rather than overshooting it just because the
+            // multiplier happened to be mid-stride when the last few needed were cleared.
+            collectProgressByTarget[i] = Mathf.Min(targets[i].count, collectProgressByTarget[i] + perMatchAmount);
             changed = true;
         }
 

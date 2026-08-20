@@ -135,6 +135,7 @@ public class DebugFeatureModeMenu : MonoBehaviour
         AddButton(panelRoot.transform, "Free Spins", () => featureTrigger?.DebugForceFeature(FreeSpinsManager.FeatureId));
         AddButton(panelRoot.transform, "Lucky Scratch Ticket", () => featureTrigger?.DebugForceFeature(LuckyScratchTicketManager.FeatureId));
         AddButton(panelRoot.transform, "Tile Collector", () => featureTrigger?.DebugForceFeature(TileCollectorManager.FeatureId));
+        AddButton(panelRoot.transform, "Disco Dance Disco", () => featureTrigger?.DebugForceFeature(DiscoDanceDiscoManager.FeatureId));
 
         AddLabel(panelRoot.transform, "DEBUG: Reset Run", 16, FontStyles.Bold);
         AddLabel(panelRoot.transform, "Deletes the save + resets stats/health", 12, FontStyles.Italic);
