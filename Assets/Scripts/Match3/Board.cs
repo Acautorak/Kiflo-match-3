@@ -490,6 +490,18 @@ public class Board : MonoBehaviour
     /// </summary>
     public IEnumerator PlayFreeSpin() => freeSpinsController.SpinOnce();
 
+    /// <summary>Lets FreeSpinsManager override FreeSpinsController.GuaranteedWonkyChainThreshold
+    /// (see that property's doc) from its own Inspector field at runtime, since FreeSpinsManager
+    /// never touches freeSpinsController directly - it only calls PlayFreeSpin(). Setting this
+    /// before a spin starts (FreeSpinsManager.StartFeatureMode does this) is enough; SpinOnce reads
+    /// the property fresh on every call, so it also takes effect immediately if changed mid-mode.
+    /// No-op if the board hasn't constructed freeSpinsController yet (e.g. called before Awake).</summary>
+    public int FreeSpinsGuaranteedWonkyChainThreshold
+    {
+        get => freeSpinsController != null ? freeSpinsController.GuaranteedWonkyChainThreshold : 0;
+        set { if (freeSpinsController != null) freeSpinsController.GuaranteedWonkyChainThreshold = value; }
+    }
+
     /// <summary>Entry point for TileCollectorManager - runs one timed Tile Collector session on
     /// the real board grid. See TileCollectorController.</summary>
     public IEnumerator PlayTileCollectorSession(float duration, int scorePerTile) =>
@@ -670,6 +682,8 @@ public class Board : MonoBehaviour
                     remaining.Add(occ);
             }
 
+        Sequence lastPopSequence = null;
+
         for (int i = 0; i < remaining.Count; i++)
         {
             var symbol = remaining[i];
@@ -681,7 +695,7 @@ public class Board : MonoBehaviour
 
             // Was two independent DOScale calls on the same transform (fighting each other
             // instead of actually popping) - Append them into a real grow-then-shrink sequence.
-            DOTween.Sequence()
+            lastPopSequence = DOTween.Sequence()
                 .Append(symbol.transform.DOScale(0.15f, 0.1f).SetEase(Ease.InBack))
                 .Append(symbol.transform.DOScale(0f, 0.1f).SetEase(Ease.InBack))
                 .OnComplete(() => Destroy(symbol.gameObject));
@@ -694,6 +708,14 @@ public class Board : MonoBehaviour
             if (!isLastInBoard && isWaveBoundary)
                 yield return new WaitForSeconds(stageClearExplosionWaveDelay);
         }
+
+        // Wait for the very last wave's pop tween to actually finish (previously the coroutine
+        // fell straight through to onComplete the instant the last wave's tweens were kicked off,
+        // so the powerup screen/StageCompletedEvent could arrive while the last symbols were still
+        // visibly mid-pop) - only the LAST tween needs waiting on since every earlier wave already
+        // ran its full duration during the per-wave delay above.
+        if (lastPopSequence != null)
+            yield return lastPopSequence.WaitForCompletion();
 
         isBusy = false;
         isStageClearing = false;

@@ -5086,6 +5086,7 @@ MonoBehaviour:
   baseSpinCount: 3
   overflowPerBonusSpin: 10
   maxSpinCount: 10
+  guaranteedWonkyChainThreshold: 4
   OnModeStarted:
     m_PersistentCalls:
       m_Calls: []

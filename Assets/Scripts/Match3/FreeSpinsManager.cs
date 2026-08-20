@@ -41,6 +41,13 @@ public class FreeSpinsManager : MonoBehaviour
     [Tooltip("Hard cap on total spins a single trigger can grant, however large the overflow was.")]
     [Min(1)] [SerializeField] private int maxSpinCount = 10;
 
+    [Header("Wonky Chance")]
+    [Tooltip("While a spin's cascade chain count is below this, the wonky/random-special trigger " +
+             "chance is forced to 100% (see FreeSpinsController.GuaranteedWonkyChainThreshold) " +
+             "instead of the normal accumulated rate (stage wonkyChance + PlayerRunStats bonus). " +
+             "0 disables the guarantee entirely.")]
+    [Min(0)] [SerializeField] private int guaranteedWonkyChainThreshold = 2;
+
     [Header("Events")]
     public UnityEvent<int> OnModeStarted;      // total spins granted
     public UnityEvent<int> OnSpinsRemainingChanged;
@@ -104,6 +111,12 @@ public class FreeSpinsManager : MonoBehaviour
 
         IsActive = true;
         SpinsRemaining = spinCount > 0 ? Mathf.Clamp(spinCount, 1, maxSpinCount) : baseSpinCount;
+
+        // Push our Inspector value into Board's FreeSpinsController now, before any SpinOnce runs -
+        // see Board.FreeSpinsGuaranteedWonkyChainThreshold and FreeSpinsController.
+        // GuaranteedWonkyChainThreshold. FreeSpinsManager never touches freeSpinsController
+        // directly, only this one plain property on Board.
+        board.FreeSpinsGuaranteedWonkyChainThreshold = guaranteedWonkyChainThreshold;
 
         // Lock the board and switch scene objects immediately - don't wait on the popup for
         // this part, so nothing is clickable underneath it even during the announcement (same

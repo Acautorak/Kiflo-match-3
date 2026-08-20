@@ -11,7 +11,11 @@ using UnityEngine.Events;
 ///
 /// Start this the same way as every other feature mode: EventBus.Publish(new
 /// FeatureModeRequestedEvent(TileCollectorManager.FeatureId)), or call StartFeatureMode() directly.
-/// </summary>
+///
+/// If introPopup is assigned, StartFeatureMode locks the board/HUD and enters FeatureMode
+/// immediately (same as before) but holds off on OnModeStarted/FeatureModeStartedEvent and the
+/// actual timed session until the player dismisses it - see BeginSessionPhase, same shape as
+/// FreeSpinsManager's introPopup/BeginSpinPhase.</summary>
 [DisallowMultipleComponent]
 public class TileCollectorManager : MonoBehaviour
 {
@@ -22,6 +26,8 @@ public class TileCollectorManager : MonoBehaviour
     [Header("References (auto-found in Awake if left empty)")]
     [SerializeField] private GameManager gameManager;
     [SerializeField] private Board board;
+    [Tooltip("Optional - if assigned, shown (and pauses the game) right as the mode starts, announcing the win, before the timer/tap-to-collect window actually begins. Leave unassigned to skip straight to collecting.")]
+    [SerializeField] private TileCollectorIntroPopup introPopup;
 
     [Header("Session")]
     [Min(1f)]
@@ -87,6 +93,22 @@ public class TileCollectorManager : MonoBehaviour
 
         gameManager?.EnterFeatureMode();
         Debug.Log($"[TileCollectorManager] Started - {duration}s, {scorePerTile} points/tile.");
+
+        if (introPopup != null)
+            introPopup.Show(BeginSessionPhase);
+        else
+            BeginSessionPhase();
+    }
+
+    /// <summary>Actually starts the timed collecting session. Called immediately by
+    /// StartFeatureMode if no intro popup is assigned, or as the popup's dismiss callback
+    /// (Continue button / auto-dismiss timer) otherwise - either way, this is the point at which
+    /// OnModeStarted/FeatureModeStartedEvent fire and RunSession's timer actually starts counting
+    /// down, since "started" should mean "the player can actually start tapping now", not "the
+    /// win announcement is on screen."</summary>
+    private void BeginSessionPhase()
+    {
+        if (!IsActive) return; // something could have ended the mode while the popup was showing
 
         OnModeStarted?.Invoke();
         EventBus.Publish(new FeatureModeStartedEvent(FeatureId));

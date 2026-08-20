@@ -45,6 +45,18 @@ public class MatchResolver
     public float RandomSpecialTriggerChance { get; set; } = 0.05f;
     public bool EnableRandomSpecialOnGravity { get; set; } = false;
 
+    /// <summary>Optional per-call override for the random-special trigger chance normally read
+    /// from RandomSpecialTriggerChance. If set, TryRandomSpecialOnGravity invokes it with the
+    /// current chainCount and uses its return value instead of RandomSpecialTriggerChance for
+    /// that call - forceOnce still bypasses the roll entirely either way, since it never consults
+    /// either chance value. Null (default) preserves normal behavior. This exists so a caller
+    /// like FreeSpinsController can guarantee a proc while the cascade is still short (chainCount
+    /// below some threshold) and fall back to the real accumulated rate afterward, without
+    /// MatchResolver itself knowing anything about Free Spins. Callers are responsible for
+    /// restoring this (typically to whatever it was before, often null) once they're done, so the
+    /// override doesn't leak into other code sharing the same MatchResolver instance.</summary>
+    public System.Func<int, float> TriggerChanceOverride { get; set; }
+
     /// <summary>
     /// Hard safety cap on how many cascade steps a single Resolve() call can run, regardless of
     /// whether each step is making "real" progress (see anyProgressThisStep below - this is a
@@ -405,10 +417,14 @@ public class MatchResolver
         if (EligibleRandomSpecialTypes == null || EligibleRandomSpecialTypes.Length == 0) yield break;
         if (!forceOnce && !EnableRandomSpecialOnGravity) yield break;
 
+        // Fixed once per call (chainCount doesn't change across this method's own while loop) -
+        // TriggerChanceOverride, when set, replaces the normal accumulated RandomSpecialTriggerChance.
+        float triggerChance = TriggerChanceOverride != null ? TriggerChanceOverride(chainCount) : RandomSpecialTriggerChance;
+
         int triggered = 0;
         int cap = forceOnce ? 1 : MaxConsecutiveRandomTriggers;
 
-        while (triggered < cap && (forceOnce || Random.value < RandomSpecialTriggerChance))
+        while (triggered < cap && (forceOnce || Random.value < triggerChance))
         {
             var candidates = new List<Vector2Int>();
             for (int x = 0; x < grid.Width; x++)

@@ -26,6 +26,13 @@ using UnityEngine;
 /// pipeline too - so a spin's result always ends up going through the same scoring/cascade/
 /// specials/Madness-effect code path a regular move would.
 ///
+/// Separately, once a spin's result (natural or forced) actually runs through MatchResolver.
+/// Resolve, its cascade gets a wonky-proc guarantee of its own: while that cascade's chain count
+/// is below GuaranteedWonkyChainThreshold, the odds of a random-special proc on each gravity
+/// settle are forced to 100% (via MatchResolver.TriggerChanceOverride) instead of the normal
+/// accumulated rate, and EnableRandomSpecialOnGravity is forced on for the duration regardless of
+/// the stage's own setting - both are restored to whatever they were once resolution finishes.
+///
 /// Board owns and constructs this (see Board.Awake/PlayFreeSpin) the same way it owns
 /// GravityController - FreeSpinsManager (the SPIN-button-facing MonoBehaviour) never touches grid
 /// internals directly, it only calls Board.PlayFreeSpin() once per spin.
@@ -68,11 +75,22 @@ public class FreeSpinsController
     /// handing off to the normal cascade check.</summary>
     public int MinimumForcedChainLength { get; set; }
 
+    /// <summary>While a spin's cascade (see MatchResolver.Resolve's chainCount / ChainMatchedEvent.
+    /// ChainCount) is still below this value, the wonky/random-special trigger chance for that
+    /// cascade is forced to 100% (and EnableRandomSpecialOnGravity is forced on) instead of using
+    /// the normal accumulated rate (stage wonkyChance + PlayerRunStats.RandomSpecialChanceBonus).
+    /// Once the cascade reaches this chain count, it reverts to whatever that accumulated rate
+    /// already was. Only affects the natural cascade run through MatchResolver.Resolve below -
+    /// the separate forced-chain loop above (MinimumForcedChainLength) always triggers regardless
+    /// of chance already, since it calls TryRandomSpecialOnGravity with forceOnce=true. 0 or below
+    /// disables the guarantee entirely, so every chain count uses the normal accumulated rate.</summary>
+    public int GuaranteedWonkyChainThreshold { get; set; }
+
     public FreeSpinsController(GridModel grid, SymbolSpawner spawner, MatchResolver matchResolver,
         GameManager gameManager, MonoBehaviour coroutineRunner, float fallDuration,
         System.Func<int, int, Vector3> gridToWorld, float columnStartStagger = 0.08f,
         float reelSpinDuration = 0.6f, float reelTumbleStepDuration = 0.08f,
-        int minimumForcedChainLength = 1)
+        int minimumForcedChainLength = 1, int guaranteedWonkyChainThreshold = 2)
     {
         this.grid = grid;
         this.spawner = spawner;
@@ -86,6 +104,7 @@ public class FreeSpinsController
         ReelSpinDuration = reelSpinDuration;
         ReelTumbleStepDuration = reelTumbleStepDuration;
         MinimumForcedChainLength = Mathf.Max(1, minimumForcedChainLength);
+        GuaranteedWonkyChainThreshold = guaranteedWonkyChainThreshold;
     }
 
     /// <summary>Runs exactly one spin: overlapping conveyor-scroll reels, guarantee a result,
@@ -115,7 +134,31 @@ public class FreeSpinsController
         }
 
         if (groups.Count > 0)
-            yield return matchResolver.Resolve(groups);
+        {
+            // Guarantee wonky/random-special procs while this spin's cascade is still short (see
+            // GuaranteedWonkyChainThreshold), then fall back to whatever Board already had
+            // configured (stage wonkyChance + PlayerRunStats bonus, and whatever
+            // EnableRandomSpecialOnGravity was) once the cascade passes the threshold - saved and
+            // restored here so nothing leaks into ordinary (non-Free-Spins) play sharing this same
+            // MatchResolver instance.
+            bool previousEnabled = matchResolver.EnableRandomSpecialOnGravity;
+            var previousOverride = matchResolver.TriggerChanceOverride;
+
+            matchResolver.EnableRandomSpecialOnGravity = true;
+            int threshold = GuaranteedWonkyChainThreshold;
+            matchResolver.TriggerChanceOverride = chainCount =>
+                chainCount < threshold ? 1f : matchResolver.RandomSpecialTriggerChance;
+
+            try
+            {
+                yield return matchResolver.Resolve(groups);
+            }
+            finally
+            {
+                matchResolver.EnableRandomSpecialOnGravity = previousEnabled;
+                matchResolver.TriggerChanceOverride = previousOverride;
+            }
+        }
 
         // Back to the "waiting on the next spin / SPIN button" part of Free Spins. FreeSpinsManager
         // decides from here whether to call Board.PlayFreeSpin() again or GameManager.ExitFeatureMode().

@@ -34,6 +34,12 @@ public class StageManager : MonoBehaviour
     private bool isStageCleared;
     private bool isStageClearPending;
     private bool isAwaitingPowerupSelection;
+    /// <summary>Set when a stage's goal is reached while GameManager.IsInFeatureMode is true (e.g.
+    /// a Free Spins cascade pushes score over the goal mid-spin) - CompleteStage() bails out early
+    /// in that case instead of yanking the board out from under the running feature, and this
+    /// remembers to retry once FeatureModeEndedEvent confirms the feature has actually finished.
+    /// See CompleteStage/HandleFeatureModeEnded.</summary>
+    private bool stageCompletionPendingFeatureEnd;
     private int remainingGraceMoves;
     private int[] collectProgressByTarget = System.Array.Empty<int>();
 
@@ -113,6 +119,7 @@ public class StageManager : MonoBehaviour
         EventBus.Subscribe<PlayerMoveEvent>(HandlePlayerMove);
         EventBus.Subscribe<SymbolMatchedEvent>(HandleSymbolMatched);
         EventBus.Subscribe<GameOverEvent>(HandleGameOver);
+        EventBus.Subscribe<FeatureModeEndedEvent>(HandleFeatureModeEnded);
     }
 
     private void OnDisable()
@@ -121,6 +128,7 @@ public class StageManager : MonoBehaviour
         EventBus.Unsubscribe<PlayerMoveEvent>(HandlePlayerMove);
         EventBus.Unsubscribe<SymbolMatchedEvent>(HandleSymbolMatched);
         EventBus.Unsubscribe<GameOverEvent>(HandleGameOver);
+        EventBus.Unsubscribe<FeatureModeEndedEvent>(HandleFeatureModeEnded);
     }
 
     private void Start()
@@ -203,6 +211,7 @@ public class StageManager : MonoBehaviour
         currentStageIndex = index;
         currentStage = GetStage(index);
         InitializeCollectProgress(savedCollectProgress);
+        stageCompletionPendingFeatureEnd = false;
 
         if (restoreGraceActive)
         {
@@ -256,6 +265,7 @@ public class StageManager : MonoBehaviour
         isStageCleared = false;
         isStageClearPending = false;
         isAwaitingPowerupSelection = false;
+        stageCompletionPendingFeatureEnd = false;
         remainingGraceMoves = 0;
         movesTowardGoal = 0;
         InitializeCollectProgress();
@@ -440,6 +450,21 @@ public class StageManager : MonoBehaviour
         if (currentStage.goalType == StageGoalType.None)
             return;
 
+        // Don't yank the board out from under a running feature mode (Free Spins reels still
+        // tumbling, Kebab Karnage asteroids still falling, etc.) just because a match resolved
+        // mid-feature pushed the goal over the line - defer and let HandleFeatureModeEnded retry
+        // this exact call once the feature actually finishes (FeatureModeEndedEvent).
+        if (gameManager != null && gameManager.IsInFeatureMode)
+        {
+            if (!stageCompletionPendingFeatureEnd)
+            {
+                stageCompletionPendingFeatureEnd = true;
+                Debug.Log($"[StageManager] Stage {currentStageIndex + 1} goal reached while a feature mode " +
+                          "is active - deferring stage clear until the feature ends.");
+            }
+            return;
+        }
+
         isTransitioning = true;
         isStageClearPending = true;
         isStageCleared = false;
@@ -494,5 +519,16 @@ public class StageManager : MonoBehaviour
         if (gameManager != null)
             gameManager.SetState(GameManager.GameplayState.StageClearing);
         Debug.Log("[StageManager] Player lost. Start a new run from the UI.");
+    }
+
+    /// <summary>Retries a CompleteStage() call that was deferred because a feature mode was still
+    /// running when the stage's goal was actually reached - see CompleteStage. By the time this
+    /// fires, GameManager.IsInFeatureMode is already false (the feature manager clears it before
+    /// publishing FeatureModeEndedEvent), so CompleteStage proceeds normally this time.</summary>
+    private void HandleFeatureModeEnded(FeatureModeEndedEvent evt)
+    {
+        if (!stageCompletionPendingFeatureEnd) return;
+        stageCompletionPendingFeatureEnd = false;
+        CompleteStage();
     }
 }
