@@ -380,8 +380,18 @@ public class MatchResolver
             EventBus.Publish(new MadnessSymbolClearedEvent(occ.MadnessDefinition, pos, occ.MadnessMovesSurvived));
         }
 
-        Object.Destroy(occ.gameObject);
+        // Grid state is freed immediately - gravity/refill/rescanning must never wait on a death
+        // animation. The GameObject itself keeps existing and plays its own pop-and-fade
+        // independently (PlayMatchedEffect), only actually returned to the pool once that
+        // finishes - ResetVisualState first so it doesn't come back out of the pool still scaled
+        // up and faded from this life's matched effect.
         grid[pos.x, pos.y].Occupant = null;
+        var dying = occ;
+        dying.PlayMatchedEffect(() =>
+        {
+            dying.ResetVisualState();
+            symbolSpawner.Despawn(dying);
+        });
 
         int baseScore = 10 * chainCount;
         float colorMultiplierBonus = 0f;

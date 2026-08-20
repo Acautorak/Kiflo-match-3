@@ -160,6 +160,20 @@ public class SymbolSpawner
         // anything). BurningSystem decides fresh whether/when to ignite a newly-spawned instance.
         instance.SetBurning(0);
 
+        // Same reasoning again for Madness state: ClearCell fires a Madness Symbol's
+        // onClearedEffects when it's matched but never itself calls ClearMadness (that's a
+        // deliberate separation - onClearedEffects is a gameplay payoff, resetting pooled state
+        // is bookkeeping, and this is the one place that already owns "make this instance neutral
+        // before it goes back in the pool"). Without this, a plain refill reused from this
+        // instance would come back out still IsMadness == true - still showing the Madness
+        // overlay, still eligible for MatchFinder's wildcard treatment and MadnessSystem.
+        // TickSurvival's per-move effects - from a Madness Symbol that already paid out and no
+        // longer exists. Symbol.Initialize doesn't clear this either, so Despawn is the only
+        // place this can be caught. Applies equally to a Madness Symbol despawned via
+        // BurningSystem.CollectBurntTile (nothing stops a Madness Symbol from being ignited and
+        // burning out) - one fix here covers both paths.
+        instance.ClearMadness();
+
         instance.gameObject.SetActive(false);
 
         if (!pool.TryGetValue(instance.Type, out var queue))

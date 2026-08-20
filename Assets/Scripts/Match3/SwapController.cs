@@ -87,6 +87,18 @@ public class SwapController
         var target = grid[targetPos].Occupant;
         if (target == null) return;
 
+        // SelectSymbol effectively checks BOTH tiles for this, since every tap (first and
+        // second) runs the same IsLocked check before a swap is ever requested. A swipe only
+        // ever calls this once, resolving its target by direction+grid-lookup rather than a
+        // second tap-and-check, so without this the source tile's own check above did nothing
+        // to stop swiping FROM an unlocked tile ONTO a locked/frozen one.
+        if (target.IsLocked && !allowSwappingLockedTiles())
+        {
+            Debug.Log($"[SwapController] Swipe target {target.name} at {target.GridPosition} is locked " +
+                       $"({target.LockBehaviorMode}, {target.LockLayers} layer(s) left) - swipe blocked.");
+            return;
+        }
+
         onSwapRequested(symbol, target);
     }
 

@@ -168,11 +168,21 @@ public class Board : MonoBehaviour
     [SerializeField] private PlayerRunStats playerRunStats;
 
     private GridModel grid;
+
+    /// <summary>Read-only access for external systems that need to inspect board state without
+    /// mutating it directly (e.g. HintController's PossibleMoveFinder scan) - deliberately not a
+    /// full public grid, just enough to look, not touch.</summary>
+    public GridModel Grid => grid;
     private SymbolSpawner symbolSpawner;
     private ScoreTracker scoreTracker;
     private LockingSystem lockingSystem;
     private BurningSystem burningSystem;
     private MadnessSystem madnessSystem;
+
+    /// <summary>Same flag MatchFinder.FindMatchGroups is called with everywhere else in Board -
+    /// exposed so an external scan (HintController) evaluates hypothetical swaps against the
+    /// exact same wildcard rules the real match-resolution pipeline uses.</summary>
+    public bool TreatMadnessSymbolsAsWildcards => madnessSystem != null && madnessSystem.TreatMadnessSymbolsAsWildcards;
     private GravityController gravityController;
     private SpecialEffectSystem specialEffectSystem;
     private BoardSaveIO saveIO;

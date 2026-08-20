@@ -114,7 +114,7 @@ public class GravityController
                 grid[x, writeY].Occupant = occ;
                 grid[x, y].Occupant = null;
                 occ.GridPosition = new Vector2Int(x, writeY);
-                sequence.Join(occ.MoveTo(gridToWorld(x, writeY), fallDuration));
+                sequence.Join(occ.FallTo(gridToWorld(x, writeY), fallDuration));
                 anyMovement = true;
             }
             writeIndex++;
@@ -151,7 +151,7 @@ public class GravityController
                 }
             }
 
-            sequence.Join(instance.MoveTo(gridToWorld(x, y), fallDuration));
+            sequence.Join(instance.FallTo(gridToWorld(x, y), fallDuration));
             anyMovement = true;
         }
     }

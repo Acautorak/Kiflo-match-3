@@ -384,9 +384,151 @@ public class Symbol : MonoBehaviour
     /// </summary>
     public Tween MoveTo(Vector3 worldPosition, float duration, Ease ease = Ease.OutQuad)
     {
+        hintTween?.Kill(); // a real move means the player acted on (or past) this tile - stop suggesting it
         activeTween?.Kill();
         activeTween = transform.DOMove(worldPosition, duration).SetEase(ease);
         return activeTween;
+    }
+
+    [Header("Landing Bounce")]
+    [Tooltip("Squash-and-stretch bounce played the instant a gravity fall (see FallTo) arrives - " +
+             "NOT played for swaps (see MoveTo), since a horizontal slide isn't a 'landing'.")]
+    [Min(0.01f)] [SerializeField] private float landingBounceDuration = 0.18f;
+    [Tooltip("How wide/short the squash gets at impact - 0.2 = 20% wider, 20% shorter.")]
+    [Range(0f, 0.6f)] [SerializeField] private float landingSquashAmount = 0.22f;
+
+    private Tween landingTween;
+
+    /// <summary>
+    /// Same MoveTo contract (returns the move Tween itself for Sequence.Join, exactly like
+    /// MoveTo) but chains PlayLandingBounce onto that tween's OnComplete - fires the instant THIS
+    /// symbol's own move finishes, independent of whatever outer Sequence it got Join()'d into
+    /// (GravityController.Collapse batches a whole column/board's worth of falls into one
+    /// Sequence with different individual durations - each tile should bounce the moment it
+    /// personally lands, not all at once when the slowest one in the batch finishes). Only
+    /// GravityController should call this - a swap should keep using plain MoveTo.
+    /// </summary>
+    public Tween FallTo(Vector3 worldPosition, float duration, Ease ease = Ease.OutQuad)
+    {
+        hintTween?.Kill();
+        activeTween?.Kill();
+        var tween = transform.DOMove(worldPosition, duration).SetEase(ease);
+        tween.OnComplete(() => PlayLandingBounce());
+        activeTween = tween;
+        return tween;
+    }
+
+    /// <summary>Quick impact squash (wide+short) easing back out past 1 with a touch of overshoot
+    /// (OutElastic) so it reads as a genuine bounce-settle rather than a linear snap-back. Safe to
+    /// call standalone too (e.g. a Kebab Karnage asteroid landing) - doesn't depend on FallTo.</summary>
+    public Tween PlayLandingBounce()
+    {
+        landingTween?.Kill();
+        transform.localScale = Vector3.one;
+
+        float amt = Mathf.Clamp(landingSquashAmount, 0f, 0.6f);
+        var squashed = new Vector3(1f + amt, 1f - amt, 1f);
+
+        var seq = DOTween.Sequence();
+        seq.Append(transform.DOScale(squashed, landingBounceDuration * 0.35f).SetEase(Ease.OutQuad));
+        seq.Append(transform.DOScale(Vector3.one, landingBounceDuration * 0.65f).SetEase(Ease.OutElastic, 1, 0.6f));
+
+        landingTween = seq;
+        return seq;
+    }
+
+    [Header("Matched Effect")]
+    [Tooltip("Pop-and-fade played by PlayMatchedEffect before the caller destroys this symbol.")]
+    [Min(0.01f)] [SerializeField] private float matchedEffectDuration = 0.22f;
+    [Tooltip("Peak scale reached mid-pop, before fading out.")]
+    [SerializeField] private float matchedPopScale = 1.3f;
+
+    private Tween matchedTween;
+
+    /// <summary>
+    /// Plays a quick pop-and-fade, then invokes onComplete once it finishes - the caller
+    /// (MatchResolver.ClearCell) uses this to defer Object.Destroy until the visual is actually
+    /// done, while the grid cell itself is freed immediately, before this is even called (so
+    /// gravity/refill/rescanning never waits on a death animation - this symbol's GameObject just
+    /// keeps existing and playing its own exit independently of the logical grid state, exactly
+    /// like a fresh replacement tile visually falling in in the same frame is expected to).
+    /// Kills any in-flight move/dance tween first - a tile that's mid-swap or mid-fall when it
+    /// gets matched shouldn't keep sliding while it's also popping.
+    /// </summary>
+    public Tween PlayMatchedEffect(System.Action onComplete = null)
+    {
+        matchedTween?.Kill();
+        activeTween?.Kill();
+        danceTween?.Kill();
+        landingTween?.Kill();
+
+        var seq = DOTween.Sequence();
+        seq.Join(transform.DOScale(Vector3.one * Mathf.Max(1f, matchedPopScale), matchedEffectDuration).SetEase(Ease.OutBack));
+        if (spriteRenderer != null)
+            seq.Join(spriteRenderer.DOFade(0f, matchedEffectDuration).SetEase(Ease.InQuad));
+        seq.OnComplete(() => onComplete?.Invoke());
+
+        matchedTween = seq;
+        return seq;
+    }
+
+    /// <summary>
+    /// Restores scale and sprite color to resting values - call before returning this symbol to
+    /// SymbolSpawner's pool (see MatchResolver.ClearCell) so a reused instance doesn't come back
+    /// out still scaled up and faded from its previous life's PlayMatchedEffect. Symbol.Initialize
+    /// doesn't touch either of these itself, so without this a pooled symbol could visibly flash
+    /// in invisible-then-oversized until something else happened to touch its transform/color.
+    /// Same precedent as SetBurning(0) already being used to make sure a despawned instance
+    /// doesn't come back out still on fire - this is the equivalent cleanup for the newer
+    /// matched-pop-and-fade effect, which didn't exist when that pattern was established.
+    /// </summary>
+    public void ResetVisualState()
+    {
+        transform.localScale = Vector3.one;
+        if (spriteRenderer != null) spriteRenderer.color = baseSpriteColor;
+    }
+
+    [Header("Hint Pulse")]
+    [Tooltip("Gentle continuous scale pulse played by PlayHintPulse (see HintController) while " +
+             "this tile is being suggested as one half of a valid move. Loops until StopHintPulse " +
+             "is called - HintController does that on any accepted player move, and MoveTo/FallTo " +
+             "also kill it defensively the instant this tile actually starts moving for real.")]
+    [Min(0.05f)] [SerializeField] private float hintPulseCycleDuration = 0.6f;
+    [Range(0f, 0.3f)] [SerializeField] private float hintPulseScaleAmount = 0.12f;
+
+    private Tween hintTween;
+
+    /// <summary>Plays a FINITE burst (loops cycles, then stops and settles back to scale 1) -
+    /// not an infinite loop. This matters for HintController's periodic re-hint: PossibleMoveFinder
+    /// deterministically finds the same pair again if nothing on the board changed, so restarting
+    /// an infinite loop on the same tiles would be visually identical to doing nothing at all.
+    /// A finite burst that stops and goes quiet between calls is what actually makes a repeated
+    /// hint READ as a repeated event - burst, pause, burst, pause - the classic match-3 pattern.
+    /// </summary>
+    public Tween PlayHintPulse(int loops = 3)
+    {
+        hintTween?.Kill();
+        transform.localScale = Vector3.one;
+
+        var seq = DOTween.Sequence();
+        seq.Append(transform.DOScale(Vector3.one * (1f + Mathf.Clamp(hintPulseScaleAmount, 0f, 0.3f)), hintPulseCycleDuration * 0.5f).SetEase(Ease.InOutSine));
+        seq.Append(transform.DOScale(Vector3.one, hintPulseCycleDuration * 0.5f).SetEase(Ease.InOutSine));
+        seq.SetLoops(Mathf.Max(1, loops), LoopType.Restart);
+        seq.OnComplete(() =>
+        {
+            transform.localScale = Vector3.one;
+            hintTween = null;
+        });
+
+        hintTween = seq;
+        return seq;
+    }
+
+    public void StopHintPulse()
+    {
+        hintTween?.Kill();
+        hintTween = null;
+        transform.localScale = Vector3.one;
     }
 
     private void OnDestroy()
@@ -394,6 +536,9 @@ public class Symbol : MonoBehaviour
         activeTween?.Kill();
         convertTween?.Kill();
         danceTween?.Kill();
+        landingTween?.Kill();
+        matchedTween?.Kill();
+        hintTween?.Kill();
     }
 
     /// <summary>
