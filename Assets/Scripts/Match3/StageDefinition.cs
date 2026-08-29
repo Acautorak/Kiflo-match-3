@@ -65,7 +65,24 @@ public enum StageGoalType
     Score,
     MoveCount,
     /// <summary>Clear count of symbolType for every entry in collectTargets (tracked via SymbolMatchedEvent).</summary>
-    Collect
+    Collect,
+    /// <summary>Reach a single-move cascade of goalValue chain steps or more (ChainMatchedEvent.ChainCount).
+    /// Checked instantly per cascade step - no persistent progress, just a threshold to hit in one go.</summary>
+    ChainCombo,
+    /// <summary>Clear goalValue total symbols within a SINGLE cascade (all steps triggered by one player
+    /// move, summed together) - distinct from ChainCombo, which cares about cascade DEPTH, not total
+    /// symbols cleared. Tracked via ChainMatchedEvent.SymbolsCleared, reset whenever ChainCount == 1
+    /// (a fresh cascade starting).</summary>
+    CascadeCollect,
+    /// <summary>Clear goalValue Madness Symbols over the course of the stage (MadnessSymbolClearedEvent).</summary>
+    MadnessCleared,
+    /// <summary>Go goalValue consecutive real moves (Grace Moves excluded, same as MoveCount) without
+    /// taking any damage. Judged once each move's ENTIRE resolution (including any cascade-triggered
+    /// damage) has settled - see StageManager's GameStateChangedEvent handler for why this can't just
+    /// be judged directly on PlayerMoveEvent (damage from a move's own cascade happens AFTER that
+    /// move's PlayerMoveEvent already fired, so judging immediately would misattribute it to the
+    /// wrong move).</summary>
+    SurviveNoDamage
 }
 
 /// <summary>One "clear `count` of `symbolType`" requirement within a Collect goal.</summary>

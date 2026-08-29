@@ -13,4 +13,4 @@ MonoBehaviour:
   m_Name: MadnessDamage
   m_EditorClassIdentifier: Assembly-CSharp::MadnessDamageEffect
   baseDamage: 1
-  damagePerMoveSurvived: 1
+  damagePerMoveSurvived: 0

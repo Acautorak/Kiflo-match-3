@@ -528,7 +528,8 @@ public class Symbol : MonoBehaviour
     {
         hintTween?.Kill();
         hintTween = null;
-        transform.localScale = Vector3.one;
+        if (transform != null)
+            transform.localScale = Vector3.one;
     }
 
     private void OnDestroy()
@@ -540,6 +541,16 @@ public class Symbol : MonoBehaviour
         matchedTween?.Kill();
         hintTween?.Kill();
     }
+
+    [Header("Dance (optional)")]
+    [Tooltip("Which transform PlayDanceLoop actually animates. Leave unassigned to dance the " +
+             "whole symbol (this GameObject's own transform) - the original behavior. Assign a " +
+             "child transform (e.g. a separated 'Icon' child holding just the front sprite) to " +
+             "dance ONLY that layer, leaving sibling children like a background sprite completely " +
+             "still. Every dance move in this file reads through DanceTransform below, not " +
+             "`transform` directly, specifically so this one field controls all of them.")]
+    [SerializeField] private Transform danceTarget;
+    private Transform DanceTransform => danceTarget != null ? danceTarget : transform;
 
     /// <summary>
     /// Starts (or restarts) an idle "dance" that keeps swapping between distinct move mechanisms
@@ -553,14 +564,14 @@ public class Symbol : MonoBehaviour
     /// the same move back to back don't look identical, and no two symbols stay in sync with
     /// each other.
     ///
-    /// Deliberately stays off transform.position for every move (see BuildDanceMove) - a position
-    /// tween would fight MoveTo's own position tween since they'd both write transform.position
-    /// every frame, whereas scale/rotation are properties MoveTo never touches, which is the whole
-    /// reason this uses its own tween slot (danceTween) and coroutine (danceRoutine) in the first
-    /// place - so it can run alongside a gravity/swap MoveTo or a Madness convert highlight
-    /// without either killing the other. See Board.StartDiscoDance/StopDiscoDance and
-    /// SymbolSpawner's dance-for-new-spawns hook (DiscoDanceDiscoManager's event, including
-    /// symbols that spawn mid-event).
+    /// Deliberately stays off DanceTransform.position for every move (see BuildDanceMove) - a
+    /// position tween would fight MoveTo's own position tween since they'd both write
+    /// DanceTransform.position every frame, whereas scale/rotation are properties MoveTo never
+    /// touches, which is the whole reason this uses its own tween slot (danceTween) and coroutine
+    /// (danceRoutine) in the first place - so it can run alongside a gravity/swap MoveTo or a
+    /// Madness convert highlight without either killing the other. See Board.StartDiscoDance/
+    /// StopDiscoDance and SymbolSpawner's dance-for-new-spawns hook (DiscoDanceDiscoManager's
+    /// event, including symbols that spawn mid-event).
     /// </summary>
     public void PlayDanceLoop(float cycleDuration, float punchScaleAmount, float punchRotationDegrees)
     {
@@ -580,8 +591,8 @@ public class Symbol : MonoBehaviour
         }
         danceTween?.Kill();
         danceTween = null;
-        transform.localScale = Vector3.one;
-        transform.localRotation = Quaternion.identity;
+        DanceTransform.localScale = Vector3.one;
+        DanceTransform.localRotation = Quaternion.identity;
     }
 
     private IEnumerator DanceLoopRoutine(float cycleDuration, float punchScaleAmount, float punchRotationDegrees)
@@ -601,8 +612,8 @@ public class Symbol : MonoBehaviour
             // Force back to a clean baseline between moves regardless of which mechanism just ran
             // (a Yoyo-looped DOScale move ending state depends on its loop count parity) so the
             // next move always starts from the same resting scale/rotation rather than drifting.
-            transform.localScale = Vector3.one;
-            transform.localRotation = Quaternion.identity;
+            DanceTransform.localScale = Vector3.one;
+            DanceTransform.localRotation = Quaternion.identity;
         }
     }
 
@@ -612,18 +623,18 @@ public class Symbol : MonoBehaviour
     /// plays `repeats` times (or, for the swing/vibe moves below, an equivalent even Yoyo loop
     /// count) and then completes, handing control back to DanceLoopRoutine to roll a fresh move.
     /// Each case is a genuinely different mechanism, not just a magnitude/timing variation of the
-    /// same one - see PlayDanceLoop's doc for the reasoning on staying off transform.position.</summary>
+    /// same one - see PlayDanceLoop's doc for the reasoning on staying off DanceTransform.position.</summary>
     private Tween BuildDanceMove(int moveIndex, float cycleDuration, float punchScale, float punchRotation,
         int vibrato, float elasticity, int repeats)
     {
         switch (moveIndex)
         {
             case 0: // Punch pulse - a quick uniform scale snap, the "classic" punch feel
-                return transform.DOPunchScale(Vector3.one * Mathf.Max(0.01f, punchScale), cycleDuration, vibrato, elasticity)
+                return DanceTransform.DOPunchScale(Vector3.one * Mathf.Max(0.01f, punchScale), cycleDuration, vibrato, elasticity)
                     .SetLoops(repeats, LoopType.Restart);
 
             case 1: // Wiggle - a rotation-only punch
-                return transform.DOPunchRotation(new Vector3(0f, 0f, punchRotation), cycleDuration, vibrato, elasticity)
+                return DanceTransform.DOPunchRotation(new Vector3(0f, 0f, punchRotation), cycleDuration, vibrato, elasticity)
                     .SetLoops(repeats, LoopType.Restart);
 
             case 2: // Squash & stretch - a jelly-bounce via non-uniform scale (wide+short, then
@@ -632,28 +643,28 @@ public class Symbol : MonoBehaviour
             {
                 float amt = Mathf.Clamp(Mathf.Abs(punchScale), 0.02f, 0.6f);
                 var stretched = new Vector3(1f - amt, 1f + amt, 1f);
-                return transform.DOScale(stretched, cycleDuration * 0.5f)
+                return DanceTransform.DOScale(stretched, cycleDuration * 0.5f)
                     .SetEase(Ease.InOutSine)
                     .SetLoops(Mathf.Max(2, repeats * 2), LoopType.Yoyo);
             }
 
             case 3: // Shimmy - a fast, high-vibrato, low-elasticity rotation shake, distinctly
                     // twitchier than Wiggle above rather than just a magnitude difference.
-                return transform.DOPunchRotation(new Vector3(0f, 0f, punchRotation * 0.6f), cycleDuration * 0.5f,
+                return DanceTransform.DOPunchRotation(new Vector3(0f, 0f, punchRotation * 0.6f), cycleDuration * 0.5f,
                         vibrato: Random.Range(6, 10), elasticity: 0.15f)
                     .SetLoops(repeats, LoopType.Restart);
 
             case 4: // Breathing pulse - a slow, smooth scale in/out with no snap-back at all,
                     // the calmest move in the set.
-                return transform.DOScale(Vector3.one * (1f + Mathf.Max(0.02f, punchScale) * 0.6f), cycleDuration * 0.6f)
+                return DanceTransform.DOScale(Vector3.one * (1f + Mathf.Max(0.02f, punchScale) * 0.6f), cycleDuration * 0.6f)
                     .SetEase(Ease.InOutSine)
                     .SetLoops(Mathf.Max(2, repeats * 2), LoopType.Yoyo);
 
             case 5: // Combo - scale and rotation punches together, both at full jittered magnitude
             {
                 var seq = DOTween.Sequence();
-                seq.Join(transform.DOPunchScale(Vector3.one * Mathf.Max(0.01f, punchScale), cycleDuration, vibrato, elasticity));
-                seq.Join(transform.DOPunchRotation(new Vector3(0f, 0f, punchRotation), cycleDuration, vibrato, elasticity));
+                seq.Join(DanceTransform.DOPunchScale(Vector3.one * Mathf.Max(0.01f, punchScale), cycleDuration, vibrato, elasticity));
+                seq.Join(DanceTransform.DOPunchRotation(new Vector3(0f, 0f, punchRotation), cycleDuration, vibrato, elasticity));
                 seq.SetLoops(repeats, LoopType.Restart);
                 return seq;
             }
@@ -663,8 +674,8 @@ public class Symbol : MonoBehaviour
                     // than a twitch. Starts from one extreme so the Yoyo genuinely swings both ways.
             {
                 float swingAngle = Mathf.Max(10f, Mathf.Abs(punchRotation) * 1.5f);
-                transform.localRotation = Quaternion.Euler(0f, 0f, -swingAngle);
-                return transform.DORotate(new Vector3(0f, 0f, swingAngle), cycleDuration * 0.7f)
+                DanceTransform.localRotation = Quaternion.Euler(0f, 0f, -swingAngle);
+                return DanceTransform.DORotate(new Vector3(0f, 0f, swingAngle), cycleDuration * 0.7f)
                     .SetEase(Ease.InOutSine)
                     .SetLoops(Mathf.Max(2, repeats * 2), LoopType.Yoyo);
             }
@@ -675,9 +686,9 @@ public class Symbol : MonoBehaviour
             {
                 float spinDir = Random.value < 0.5f ? 1f : -1f;
                 var seq = DOTween.Sequence();
-                seq.Join(transform.DORotate(new Vector3(0f, 0f, 360f * spinDir), cycleDuration * 0.8f, RotateMode.FastBeyond360)
+                seq.Join(DanceTransform.DORotate(new Vector3(0f, 0f, 360f * spinDir), cycleDuration * 0.8f, RotateMode.FastBeyond360)
                     .SetEase(Ease.InOutQuad));
-                seq.Join(transform.DOPunchScale(Vector3.one * Mathf.Max(0.05f, punchScale) * 1.4f, cycleDuration * 0.8f,
+                seq.Join(DanceTransform.DOPunchScale(Vector3.one * Mathf.Max(0.05f, punchScale) * 1.4f, cycleDuration * 0.8f,
                     Mathf.Max(vibrato, 2), 0.3f));
                 seq.SetLoops(repeats, LoopType.Restart);
                 return seq;
@@ -689,11 +700,11 @@ public class Symbol : MonoBehaviour
             {
                 float tangoAngle = Mathf.Max(10f, Mathf.Abs(punchRotation) * 2f) * (Random.value < 0.5f ? 1f : -1f);
                 var seq = DOTween.Sequence();
-                seq.Append(transform.DORotate(new Vector3(0f, 0f, tangoAngle), cycleDuration * 0.25f).SetEase(Ease.OutQuad));
-                seq.Join(transform.DOScale(Vector3.one * (1f + Mathf.Max(0.02f, punchScale) * 0.5f), cycleDuration * 0.25f).SetEase(Ease.OutQuad));
+                seq.Append(DanceTransform.DORotate(new Vector3(0f, 0f, tangoAngle), cycleDuration * 0.25f).SetEase(Ease.OutQuad));
+                seq.Join(DanceTransform.DOScale(Vector3.one * (1f + Mathf.Max(0.02f, punchScale) * 0.5f), cycleDuration * 0.25f).SetEase(Ease.OutQuad));
                 seq.AppendInterval(cycleDuration * 0.25f); // the dramatic hold
-                seq.Append(transform.DORotate(Vector3.zero, cycleDuration * 0.25f).SetEase(Ease.InOutSine));
-                seq.Join(transform.DOScale(Vector3.one, cycleDuration * 0.25f).SetEase(Ease.InOutSine));
+                seq.Append(DanceTransform.DORotate(Vector3.zero, cycleDuration * 0.25f).SetEase(Ease.InOutSine));
+                seq.Join(DanceTransform.DOScale(Vector3.one, cycleDuration * 0.25f).SetEase(Ease.InOutSine));
                 seq.SetLoops(repeats, LoopType.Restart);
                 return seq;
             }
@@ -702,8 +713,8 @@ public class Symbol : MonoBehaviour
                     // compared to everything else in the set, on purpose.
             {
                 float vibeAngle = Mathf.Clamp(Mathf.Abs(punchRotation) * 0.3f, 2f, 6f);
-                transform.localRotation = Quaternion.Euler(0f, 0f, -vibeAngle);
-                return transform.DORotate(new Vector3(0f, 0f, vibeAngle), cycleDuration * 1.5f)
+                DanceTransform.localRotation = Quaternion.Euler(0f, 0f, -vibeAngle);
+                return DanceTransform.DORotate(new Vector3(0f, 0f, vibeAngle), cycleDuration * 1.5f)
                     .SetEase(Ease.InOutSine)
                     .SetLoops(Mathf.Max(2, repeats), LoopType.Yoyo);
             }

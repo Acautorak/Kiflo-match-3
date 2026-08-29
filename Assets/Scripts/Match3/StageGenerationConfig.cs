@@ -30,6 +30,10 @@ public class StageGenerationConfig : ScriptableObject
         new GoalTypeWeight { type = StageGoalType.Score, weight = 3f },
         new GoalTypeWeight { type = StageGoalType.MoveCount, weight = 1f },
         new GoalTypeWeight { type = StageGoalType.Collect, weight = 2f },
+        new GoalTypeWeight { type = StageGoalType.ChainCombo, weight = 1f },
+        new GoalTypeWeight { type = StageGoalType.CascadeCollect, weight = 1f },
+        new GoalTypeWeight { type = StageGoalType.MadnessCleared, weight = 1f },
+        new GoalTypeWeight { type = StageGoalType.SurviveNoDamage, weight = 1f },
     };
     public IntRange scoreGoal = new IntRange { min = 800, max = 6000 };
     public IntRange moveCountGoal = new IntRange { min = 10, max = 28 };
@@ -39,6 +43,14 @@ public class StageGenerationConfig : ScriptableObject
              "(e.g. 2 = \"collect 20 Red AND 15 Blue\"). Keep min at 1 so early stages stay simple; " +
              "raise max to make later stages juggle more colors at once.")]
     public IntRange collectTargetCount = new IntRange { min = 1, max = 3 };
+    [Tooltip("Chain-depth threshold for a ChainCombo goal (ChainMatchedEvent.ChainCount to reach in one move).")]
+    public IntRange chainComboGoal = new IntRange { min = 3, max = 6 };
+    [Tooltip("Total-symbols-cleared threshold for a CascadeCollect goal, summed across one whole cascade.")]
+    public IntRange cascadeCollectGoal = new IntRange { min = 8, max = 20 };
+    [Tooltip("How many Madness Symbols to clear for a MadnessCleared goal.")]
+    public IntRange madnessClearedGoal = new IntRange { min = 3, max = 10 };
+    [Tooltip("Consecutive damage-free moves needed for a SurviveNoDamage goal.")]
+    public IntRange noDamageStreakGoal = new IntRange { min = 5, max = 15 };
 
     [Header("Grace Period")]
     public IntRange gracePeriodMoves = new IntRange { min = 2, max = 5 };

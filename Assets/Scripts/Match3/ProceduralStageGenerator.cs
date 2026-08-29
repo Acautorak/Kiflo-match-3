@@ -40,6 +40,18 @@ public static class ProceduralStageGenerator
                 stage.goalValue = 0;
                 foreach (var target in stage.collectTargets) stage.goalValue += target.count;
                 break;
+            case StageGoalType.ChainCombo:
+                stage.goalValue = config.chainComboGoal.Lerp(t);
+                break;
+            case StageGoalType.CascadeCollect:
+                stage.goalValue = config.cascadeCollectGoal.Lerp(t);
+                break;
+            case StageGoalType.MadnessCleared:
+                stage.goalValue = config.madnessClearedGoal.Lerp(t);
+                break;
+            case StageGoalType.SurviveNoDamage:
+                stage.goalValue = config.noDamageStreakGoal.Lerp(t);
+                break;
             default:
                 stage.goalValue = config.scoreGoal.Lerp(t);
                 break;

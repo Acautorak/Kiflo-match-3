@@ -121,6 +121,10 @@ public class StageManager : MonoBehaviour
         EventBus.Subscribe<SymbolMatchedEvent>(HandleSymbolMatched);
         EventBus.Subscribe<GameOverEvent>(HandleGameOver);
         EventBus.Subscribe<FeatureModeEndedEvent>(HandleFeatureModeEnded);
+        EventBus.Subscribe<ChainMatchedEvent>(HandleChainMatchedForGoal);
+        EventBus.Subscribe<MadnessSymbolClearedEvent>(HandleMadnessSymbolClearedForGoal);
+        EventBus.Subscribe<HealthChangedEvent>(HandleHealthChangedForGoal);
+        EventBus.Subscribe<GameStateChangedEvent>(HandleGameStateChangedForGoal);
     }
 
     private void OnDisable()
@@ -130,6 +134,10 @@ public class StageManager : MonoBehaviour
         EventBus.Unsubscribe<SymbolMatchedEvent>(HandleSymbolMatched);
         EventBus.Unsubscribe<GameOverEvent>(HandleGameOver);
         EventBus.Unsubscribe<FeatureModeEndedEvent>(HandleFeatureModeEnded);
+        EventBus.Unsubscribe<ChainMatchedEvent>(HandleChainMatchedForGoal);
+        EventBus.Unsubscribe<MadnessSymbolClearedEvent>(HandleMadnessSymbolClearedForGoal);
+        EventBus.Unsubscribe<HealthChangedEvent>(HandleHealthChangedForGoal);
+        EventBus.Unsubscribe<GameStateChangedEvent>(HandleGameStateChangedForGoal);
     }
 
     private void Start()
@@ -293,6 +301,12 @@ public class StageManager : MonoBehaviour
         stageCompletionPendingFeatureEnd = false;
         remainingGraceMoves = 0;
         movesTowardGoal = 0;
+        madnessClearedCount = 0;
+        cascadeCollectAccumulator = 0;
+        noDamageStreakMoves = 0;
+        lastKnownHealthForStreak = -1;
+        healthDroppedThisMove = false;
+        moveWasRegisteredSinceLastSettle = false;
         InitializeCollectProgress();
 
         if (gameManager != null)
@@ -329,6 +343,7 @@ public class StageManager : MonoBehaviour
         runSeed = GenerateRandomSeed();
         generatedStages.Clear();
         generatedLockPlacements.Clear();
+        generatedShapes.Clear();
 
         if (playerRunStats != null)
             playerRunStats.ResetForNewRun();
@@ -410,10 +425,35 @@ public class StageManager : MonoBehaviour
     /// </summary>
     private int movesTowardGoal;
 
+    private int madnessClearedCount;
+    /// <summary>Live progress for MadnessCleared - exposed the same way CurrentCollectProgress is, for UI.</summary>
+    public int CurrentMadnessClearedCount => madnessClearedCount;
+
+    private int cascadeCollectAccumulator;
+
+    private int noDamageStreakMoves;
+    /// <summary>Live progress for SurviveNoDamage - exposed the same way CurrentCollectProgress is, for UI.</summary>
+    public int CurrentNoDamageStreak => noDamageStreakMoves;
+    private int lastKnownHealthForStreak = -1;
+    /// <summary>True if ANY damage occurred since the currently-open move started - judged (and
+    /// cleared) once that move's resolution fully settles, see HandleGameStateChangedForGoal.</summary>
+    private bool healthDroppedThisMove;
+    /// <summary>True once a real (non-Grace) move has been registered that still needs judging
+    /// against the no-damage streak - set by HandlePlayerMove, consumed by
+    /// HandleGameStateChangedForGoal once the board actually settles.</summary>
+    private bool moveWasRegisteredSinceLastSettle;
+
     private void HandlePlayerMove(PlayerMoveEvent evt)
     {
         if (currentStage == null) return;
         if (evt.WasGraceMove) return; // Grace Moves never count toward any stage requirement
+
+        if (currentStage.goalType == StageGoalType.SurviveNoDamage)
+        {
+            moveWasRegisteredSinceLastSettle = true;
+            return;
+        }
+
         if (currentStage.goalType != StageGoalType.MoveCount) return;
 
         movesTowardGoal++;
@@ -458,6 +498,78 @@ public class StageManager : MonoBehaviour
             if (collectProgressByTarget[i] < targets[i].count)
                 return false;
         return true;
+    }
+
+    /// <summary>
+    /// Handles both ChainCombo and CascadeCollect - both key off the same event, just checking a
+    /// different thing (cascade DEPTH vs total symbols cleared across the cascade), so one
+    /// subscription covers both rather than two near-identical ones.
+    /// </summary>
+    private void HandleChainMatchedForGoal(ChainMatchedEvent evt)
+    {
+        if (currentStage == null) return;
+
+        if (currentStage.goalType == StageGoalType.ChainCombo)
+        {
+            if (evt.ChainCount >= currentStage.goalValue)
+                CompleteStage();
+            return;
+        }
+
+        if (currentStage.goalType == StageGoalType.CascadeCollect)
+        {
+            // ChainCount == 1 means a fresh cascade is starting (see ChainMatchedEvent's own field
+            // doc) - reset the accumulator so an earlier move's leftover total can't carry over.
+            if (evt.ChainCount == 1) cascadeCollectAccumulator = 0;
+            cascadeCollectAccumulator += evt.SymbolsCleared;
+
+            if (cascadeCollectAccumulator >= currentStage.goalValue)
+                CompleteStage();
+        }
+    }
+
+    private void HandleMadnessSymbolClearedForGoal(MadnessSymbolClearedEvent evt)
+    {
+        if (currentStage == null || currentStage.goalType != StageGoalType.MadnessCleared) return;
+
+        madnessClearedCount++;
+        if (madnessClearedCount >= currentStage.goalValue)
+            CompleteStage();
+    }
+
+    /// <summary>
+    /// Just tracks whether damage happened - doesn't judge the streak itself. Judging happens in
+    /// HandleGameStateChangedForGoal once a move's ENTIRE resolution has settled, not here,
+    /// because Board.RegisterPlayerMove (PlayerMoveEvent) fires BEFORE match resolution/cascade
+    /// damage for that same move - judging directly off PlayerMoveEvent would misattribute a
+    /// move's own damage to the move that comes AFTER it instead.
+    /// </summary>
+    private void HandleHealthChangedForGoal(HealthChangedEvent evt)
+    {
+        if (lastKnownHealthForStreak >= 0 && evt.CurrentHealth < lastKnownHealthForStreak)
+            healthDroppedThisMove = true;
+
+        lastKnownHealthForStreak = evt.CurrentHealth;
+    }
+
+    private void HandleGameStateChangedForGoal(GameStateChangedEvent evt)
+    {
+        if (currentStage == null || currentStage.goalType != StageGoalType.SurviveNoDamage) return;
+        if (!moveWasRegisteredSinceLastSettle) return; // settled without a real move happening - nothing to judge
+
+        bool settled = evt.Current == GameManager.GameplayState.Idle || evt.Current == GameManager.GameplayState.GracePeriod;
+        if (!settled) return;
+
+        if (healthDroppedThisMove)
+            noDamageStreakMoves = 0;
+        else
+            noDamageStreakMoves++;
+
+        moveWasRegisteredSinceLastSettle = false;
+        healthDroppedThisMove = false;
+
+        if (noDamageStreakMoves >= currentStage.goalValue)
+            CompleteStage();
     }
 
     /// <summary>Playtest-only: forces the current stage to complete right now, exactly as if its
