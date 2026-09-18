@@ -76,9 +76,26 @@ public class Symbol : MonoBehaviour
     private Color baseSpriteColor = Color.white;
     private Tween convertTween;
 
+    [Header("Outline Glow (optional)")]
+    [Tooltip("Material using Match3/Sprite/OutlineGlow (or any shader exposing a _GlowIntensity " +
+             "float). Instanced once in Awake, if assigned, so per-instance glow doesn't affect " +
+             "other symbols sharing the same material asset, then assigned to spriteRenderer in " +
+             "place of whatever it had. Leave unassigned to skip outline glow entirely - " +
+             "PlayHintPulse falls back to the scale-only pulse it always had.")]
+    [SerializeField] private Material outlineGlowMaterialTemplate;
+    [Range(0f, 1f)] [SerializeField] private float hintGlowPeakIntensity = 0.85f;
+    private static readonly int GlowIntensityId = Shader.PropertyToID("_GlowIntensity");
+    private Material outlineGlowMaterialInstance;
+
     private void Awake()
     {
         if (spriteRenderer != null) baseSpriteColor = spriteRenderer.color;
+
+        if (spriteRenderer != null && outlineGlowMaterialTemplate != null)
+        {
+            outlineGlowMaterialInstance = new Material(outlineGlowMaterialTemplate);
+            spriteRenderer.material = outlineGlowMaterialInstance;
+        }
     }
     [SerializeField] private GameObject madnessOverlay;
     [Tooltip("Optional: SpriteRenderer on madnessOverlay, swapped to the assigned MadnessSymbolDefinition's icon if both are set.")]
@@ -386,6 +403,7 @@ public class Symbol : MonoBehaviour
     {
         hintTween?.Kill(); // a real move means the player acted on (or past) this tile - stop suggesting it
         activeTween?.Kill();
+        mergeReceiveTween?.Kill();
         activeTween = transform.DOMove(worldPosition, duration).SetEase(ease);
         return activeTween;
     }
@@ -412,6 +430,7 @@ public class Symbol : MonoBehaviour
     {
         hintTween?.Kill();
         activeTween?.Kill();
+        mergeReceiveTween?.Kill();
         var tween = transform.DOMove(worldPosition, duration).SetEase(ease);
         tween.OnComplete(() => PlayLandingBounce());
         activeTween = tween;
@@ -485,6 +504,7 @@ public class Symbol : MonoBehaviour
     public void ResetVisualState()
     {
         transform.localScale = Vector3.one;
+        transform.rotation = Quaternion.identity;
         if (spriteRenderer != null) spriteRenderer.color = baseSpriteColor;
     }
 
@@ -509,14 +529,23 @@ public class Symbol : MonoBehaviour
     {
         hintTween?.Kill();
         transform.localScale = Vector3.one;
+        outlineGlowMaterialInstance?.SetFloat(GlowIntensityId, 0f);
 
         var seq = DOTween.Sequence();
         seq.Append(transform.DOScale(Vector3.one * (1f + Mathf.Clamp(hintPulseScaleAmount, 0f, 0.3f)), hintPulseCycleDuration * 0.5f).SetEase(Ease.InOutSine));
         seq.Append(transform.DOScale(Vector3.one, hintPulseCycleDuration * 0.5f).SetEase(Ease.InOutSine));
+
+        if (outlineGlowMaterialInstance != null)
+        {
+            seq.Insert(0f, outlineGlowMaterialInstance.DOFloat(hintGlowPeakIntensity, GlowIntensityId, hintPulseCycleDuration * 0.5f).SetEase(Ease.InOutSine));
+            seq.Insert(hintPulseCycleDuration * 0.5f, outlineGlowMaterialInstance.DOFloat(0f, GlowIntensityId, hintPulseCycleDuration * 0.5f).SetEase(Ease.InOutSine));
+        }
+
         seq.SetLoops(Mathf.Max(1, loops), LoopType.Restart);
         seq.OnComplete(() =>
         {
             transform.localScale = Vector3.one;
+            outlineGlowMaterialInstance?.SetFloat(GlowIntensityId, 0f);
             hintTween = null;
         });
 
@@ -528,8 +557,104 @@ public class Symbol : MonoBehaviour
     {
         hintTween?.Kill();
         hintTween = null;
-        if (transform != null)
-            transform.localScale = Vector3.one;
+        transform.localScale = Vector3.one;
+        outlineGlowMaterialInstance?.SetFloat(GlowIntensityId, 0f);
+    }
+
+    [Header("Combine on Match (optional)")]
+    [Tooltip("How long a doomed symbol takes to fly toward and shrink into the surviving merged " +
+             "symbol - see PlayMergeInto.")]
+    [Min(0.05f)] [SerializeField] private float mergeFlyDuration = 0.3f;
+    [Tooltip("How much extra scale the survivor's punch-scale bounce adds at its peak (0.4 = " +
+             "scales up to 140% before springing back to 100%) - see PlayMergeReceiveBounce.")]
+    [Range(0.1f, 1f)] [SerializeField] private float mergeReceivePunchAmount = 0.4f;
+    [Min(0.05f)] [SerializeField] private float mergeReceiveDuration = 0.3f;
+    [Tooltip("How far (world units) the survivor rises during its post-merge celebration beat - " +
+             "see PlayMergeReceiveBounce.")]
+    [Min(0f)] [SerializeField] private float mergeRiseDistance = 0.3f;
+    [Tooltip("Total duration of the rise-then-settle motion, split evenly between rising and " +
+             "coming back down. Plain scaled-time tweens - see PlayMergeReceiveBounce's comment " +
+             "on why this automatically plays in slow motion during Combine's slow-mo beat.")]
+    [Min(0.05f)] [SerializeField] private float mergeRiseDuration = 0.6f;
+    [Tooltip("Brief pause at the peak of the rise, glowing, before settling back down.")]
+    [Min(0f)] [SerializeField] private float mergeRiseHoldDuration = 0.15f;
+    [Tooltip("Peak outline glow intensity during the rise - requires outlineGlowMaterialTemplate " +
+             "to be assigned (see the Outline Glow section above); silently does nothing otherwise.")]
+    [Range(0f, 1f)] [SerializeField] private float mergeGlowPeakIntensity = 1f;
+
+    private Tween mergeTween;
+    private Tween mergeReceiveTween;
+
+    /// <summary>
+    /// Roguelike "Combine on Match": plays this (doomed) symbol flying toward and shrinking into
+    /// survivorWorldPos, then invokes onComplete once it arrives - same contract as
+    /// PlayMatchedEffect, so the caller (MatchResolver) despawns it identically, just with a
+    /// different visual on the way out. Plain move + scale-to-zero, deliberately no rotation - an
+    /// earlier version of this spun the symbol as it flew in, which caused a real bug: the spin
+    /// was one-way and nothing reset transform.rotation before the instance went back into the
+    /// pool, so a later Spawn() reusing it could come back out visibly upside-down (see
+    /// ResetVisualState, which now resets rotation too - belt and suspenders, but removing the
+    /// spin here removes the failure mode at its source rather than only patching around it).
+    /// </summary>
+    public Tween PlayMergeInto(Vector3 survivorWorldPos, System.Action onComplete = null)
+    {
+        mergeTween?.Kill();
+        activeTween?.Kill();
+        danceTween?.Kill();
+        landingTween?.Kill();
+        hintTween?.Kill();
+        transform.rotation = Quaternion.identity;
+
+        var seq = DOTween.Sequence();
+        seq.Join(transform.DOMove(survivorWorldPos, mergeFlyDuration).SetEase(Ease.InQuad));
+        seq.Join(transform.DOScale(Vector3.zero, mergeFlyDuration).SetEase(Ease.InBack));
+        seq.OnComplete(() => onComplete?.Invoke());
+
+        mergeTween = seq;
+        return seq;
+    }
+
+    /// <summary>
+    /// The survivor's own reaction as the others merge into it - a single DOTween DOPunchScale
+    /// call (the punch-and-scale this was asked for): overshoots by mergeReceivePunchAmount then
+    /// springs back to resting scale, one shortcut instead of a hand-built multi-step sequence.
+    /// Bigger than PlayLandingBounce's impact squash, since this should read as a celebratory
+    /// "yes!" rather than "something just landed on me". Doesn't touch position or rotation - the
+    /// survivor never moved, it's the same symbol the whole time, just reacting to its neighbors
+    /// joining it.
+    /// </summary>
+    public Tween PlayMergeReceiveBounce()
+    {
+        mergeReceiveTween?.Kill();
+        transform.localScale = Vector3.one;
+        transform.rotation = Quaternion.identity;
+        outlineGlowMaterialInstance?.SetFloat(GlowIntensityId, 0f);
+
+        Vector3 restPos = transform.position;
+
+        var seq = DOTween.Sequence();
+
+        // Immediate impact reaction.
+        seq.Append(transform.DOPunchScale(Vector3.one * mergeReceivePunchAmount, mergeReceiveDuration, vibrato: 6, elasticity: 0.7f));
+
+        // Celebration beat: rises and glows, holds a moment, then settles back down and fades.
+        // Deliberately plain scaled-time tweens (no SetUpdate(true)) - SpecialSymbolEventRelay
+        // already pushes a brief Time.timeScale slowdown on every Combine (see
+        // HandleCombineTriggered/PlayCombineSlowMo), so this automatically plays out in slow
+        // motion during that window with zero coupling between the two systems - Symbol.cs
+        // doesn't need to know slow-mo exists at all for this to work.
+        seq.Append(transform.DOMoveY(restPos.y + mergeRiseDistance, mergeRiseDuration * 0.5f).SetEase(Ease.OutSine));
+        if (outlineGlowMaterialInstance != null)
+            seq.Join(outlineGlowMaterialInstance.DOFloat(mergeGlowPeakIntensity, GlowIntensityId, mergeRiseDuration * 0.5f).SetEase(Ease.OutSine));
+
+        seq.AppendInterval(mergeRiseHoldDuration);
+
+        seq.Append(transform.DOMoveY(restPos.y, mergeRiseDuration * 0.5f).SetEase(Ease.InSine));
+        if (outlineGlowMaterialInstance != null)
+            seq.Join(outlineGlowMaterialInstance.DOFloat(0f, GlowIntensityId, mergeRiseDuration * 0.5f).SetEase(Ease.InSine));
+
+        mergeReceiveTween = seq;
+        return seq;
     }
 
     private void OnDestroy()
@@ -540,6 +665,8 @@ public class Symbol : MonoBehaviour
         landingTween?.Kill();
         matchedTween?.Kill();
         hintTween?.Kill();
+        mergeTween?.Kill();
+        mergeReceiveTween?.Kill();
     }
 
     [Header("Dance (optional)")]

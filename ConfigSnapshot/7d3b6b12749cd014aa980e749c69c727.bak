@@ -17,9 +17,13 @@ MonoBehaviour:
   icon: {fileID: 21300000, guid: d6769a2804ba49040a333cb10e7dedef, type: 3}
   weight: 8
   randomSpecialChanceBonus: 0.01
+  igniteOnMatchChanceBonus: 0
+  combineOnMatchChanceBonus: 0
   lockChanceReduction: 0
-  scoreMultiplierBonus: 0
+  scoreMultiplierBonus: 0.01
   bonusGraceMoves: 0
   bonusMaxHealth: 0
   healAmount: 0
+  bonusKebabTapDamage: 0
+  graceMoveChanceBonus: 0
   colorEffects: []

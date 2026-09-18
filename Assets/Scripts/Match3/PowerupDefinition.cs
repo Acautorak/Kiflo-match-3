@@ -23,6 +23,11 @@ public class PowerupDefinition : ScriptableObject
              "ignites and starts burning down. Baseline 0, so this is what gives the player any " +
              "chance at all. See BurningSystem.")]
     [Range(0f, 1f)] public float igniteOnMatchChanceBonus;
+    [Tooltip("Added to PlayerRunStats.CombineOnMatchChance (0-1 fraction) - the chance, rolled " +
+             "once per matched group, that its cells combine into ONE surviving symbol of the " +
+             "matched color instead of all clearing independently. Baseline 0. See " +
+             "MatchResolver.Resolve.")]
+    [Range(0f, 1f)] public float combineOnMatchChanceBonus;
     [Tooltip("Added to PlayerRunStats.LockChanceReduction (reduces lock/freeze spawn chance).")]
     public float lockChanceReduction;
     [Tooltip("Added to PlayerRunStats.ScoreMultiplier (e.g. 0.1 = +10% score for the rest of the run).")]
@@ -70,6 +75,7 @@ public class PowerupDefinition : ScriptableObject
         {
             stats.AddRandomSpecialChanceBonus(randomSpecialChanceBonus);
             stats.AddIgniteChanceBonus(igniteOnMatchChanceBonus);
+            stats.AddCombineOnMatchChanceBonus(combineOnMatchChanceBonus);
             stats.AddLockChanceReduction(lockChanceReduction);
             stats.AddScoreMultiplier(scoreMultiplierBonus);
             stats.AddBonusGraceMoves(bonusGraceMoves);

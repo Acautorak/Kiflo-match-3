@@ -113,11 +113,16 @@ public class MatchResolver
 
             var allPositions = new HashSet<Vector2Int>();
             var specialsToCreate = new Dictionary<Vector2Int, (SpecialType special, SymbolType type)>();
+            var combineSurvivors = new HashSet<Vector2Int>();
+            var combineFlyTarget = new Dictionary<Vector2Int, Vector2Int>();
 
             foreach (var group in currentGroups)
             {
                 foreach (var p in group.Cells) allPositions.Add(p);
-                RegisterSpecialsFromMatchGroup(group, specialsToCreate);
+
+                bool combined = TryResolveCombine(group, combineSurvivors, combineFlyTarget);
+                if (!combined)
+                    RegisterSpecialsFromMatchGroup(group, specialsToCreate);
 
                 // Color-targeted "heal on match" powerups roll their chance once per matched
                 // group here, before any clearing happens below, while the seed cell's Occupant
@@ -192,6 +197,43 @@ public class MatchResolver
             bool anyProgressThisStep = false;
             foreach (var pos in allPositions)
             {
+                // Combine survivor: scores exactly like a normal clear, but is never destroyed -
+                // it just plays a happy little reaction bounce and stays exactly where it is.
+                // TryResolveCombine already guaranteed this cell isn't locked/special/Madness, so
+                // ComputeMatchScore's plain color-based formula applies with no further checks.
+                if (combineSurvivors.Contains(pos))
+                {
+                    var survivorOcc = grid[pos.x, pos.y].Occupant;
+                    if (survivorOcc != null)
+                    {
+                        scoreDelta += ComputeMatchScore(survivorOcc.Type, chainCount);
+                        survivorOcc.PlayMergeReceiveBounce();
+                        anyProgressThisStep = true; // the other cells in its group are being removed
+                    }
+                    continue;
+                }
+
+                // Combine doomed cell: scores identically to a normal clear, but flies into and
+                // shrinks toward its survivor (PlayMergeInto) instead of popping in place, then
+                // despawns exactly the same way ClearCell's normal path does.
+                if (combineFlyTarget.TryGetValue(pos, out var survivorPos))
+                {
+                    var dyingOcc = grid[pos.x, pos.y].Occupant;
+                    if (dyingOcc != null)
+                    {
+                        scoreDelta += ComputeMatchScore(dyingOcc.Type, chainCount);
+                        grid[pos.x, pos.y].Occupant = null;
+                        var dying = dyingOcc;
+                        dying.PlayMergeInto(gridToWorld(survivorPos.x, survivorPos.y), () =>
+                        {
+                            dying.ResetVisualState();
+                            symbolSpawner.Despawn(dying);
+                        });
+                        anyProgressThisStep = true;
+                    }
+                    continue;
+                }
+
                 bool isSpecialSeed = specialsToCreate.ContainsKey(pos);
                 var occBefore = grid[pos.x, pos.y].Occupant;
                 // A seed cell that's locked OR an immune Madness Symbol doesn't get replaced by
@@ -393,6 +435,18 @@ public class MatchResolver
             symbolSpawner.Despawn(dying);
         });
 
+        return (true, ComputeMatchScore(color, chainCount));
+    }
+
+    /// <summary>
+    /// Shared per-cell scoring formula - used by ClearCell for a normal clear, and by
+    /// TryResolveCombine for a combined group's cells (including the survivor, which still earns
+    /// its own score even though it isn't actually destroyed). Keeping this in one place means a
+    /// combined match scores IDENTICALLY to a normal one, exactly as intended ("normal matched 3
+    /// values as usual") rather than needing to duplicate this formula a second time.
+    /// </summary>
+    private int ComputeMatchScore(SymbolType color, int chainCount)
+    {
         int baseScore = 10 * chainCount;
         float colorMultiplierBonus = 0f;
         int colorFlatBonus = 0;
@@ -414,7 +468,73 @@ public class MatchResolver
             baseScore = Mathf.RoundToInt(baseScore * (1f + colorMultiplierBonus));
         baseScore += colorFlatBonus;
 
-        return (true, baseScore);
+        return baseScore;
+    }
+
+    /// <summary>
+    /// Roguelike "Combine on Match": once per group, a chance (PlayerRunStats.CombineOnMatchChance)
+    /// that instead of every matched cell clearing independently, all but one collapse into a
+    /// single surviving symbol at a random one of their positions. Scoring is completely
+    /// unaffected - every cell, including the survivor, still awards score via ComputeMatchScore
+    /// exactly as a normal clear would, and SymbolMatchedEvent/ChainMatchedEvent/Collect-goal
+    /// progress (published earlier in Resolve, before this runs) already counted every cell as
+    /// matched regardless - only what's physically LEFT on the board afterward changes.
+    ///
+    /// Only eligible for a "pure" group: every cell must be a genuine, non-special, non-Madness,
+    /// unlocked symbol of the same color. Excluding Special/Madness/locked cells sidesteps a pile
+    /// of edge cases a v1 doesn't need to solve (a merged-away Madness Symbol would need its own
+    /// immunity/onClearedEffects/MadnessSymbolClearedEvent handling; a merged-away lock would need
+    /// RemoveLockLayer's hit-absorption logic) - deliberately scoped this way for now. A group
+    /// that would otherwise create a special (a 4+/intersection match) simply doesn't when it
+    /// combines instead - upgrading the survivor into a special of its own is an intentional
+    /// future step (see PlayerRunStats.CombineOnMatchChance's doc comment), not implemented yet.
+    ///
+    /// Returns true if this group combined - adds the survivor's position to `survivorPositions`
+    /// and every other cell to `flyTarget` (mapping doomed cell -> survivor position) so the main
+    /// clearing loop in Resolve() knows to treat this group's cells specially instead of running
+    /// them through ordinary ClearCell.
+    /// </summary>
+    private bool TryResolveCombine(MatchGroup group, HashSet<Vector2Int> survivorPositions,
+        Dictionary<Vector2Int, Vector2Int> flyTarget)
+    {
+        if (playerRunStats == null) return false;
+
+        float chance = playerRunStats.CombineOnMatchChance;
+        if (chance <= 0f || Random.value >= chance) return false;
+
+        var cells = group.Cells.ToList();
+        foreach (var p in cells)
+        {
+            var occ = grid[p.x, p.y].Occupant;
+            if (occ == null || occ.Special != SpecialType.None || occ.IsMadness || occ.IsLocked)
+                return false; // not a "pure" group - leave it to resolve normally
+        }
+
+        // Pick a random cell for variety (preserves "random position among the matched cells"),
+        // then correct it to the bottom-most cell in the SAME COLUMN among this group's cells.
+        // Gravity only ever moves things vertically within their own column, and a matched run's
+        // cells are always contiguous (no gaps - that's what makes it a run), so that bottom-most
+        // cell is exactly where the surviving tile will end up once gravity collapses the column
+        // underneath it. Without this correction, a mid-run survivor (e.g. the middle of a
+        // vertical 3-match) would settle from the merge, then immediately get dragged down again
+        // by gravity closing the gap the removed cells below it left behind - two separate
+        // motions where there should be one. Since every cell in the group is the same type
+        // anyway, whichever occupant is already sitting at that final spot just IS the survivor -
+        // no grid-data relocation needed, only the OTHER cells need to fly anywhere.
+        var candidate = cells[Random.Range(0, cells.Count)];
+        var landingPos = candidate;
+        foreach (var p in cells)
+            if (p.x == candidate.x && p.y < landingPos.y)
+                landingPos = p;
+
+        survivorPositions.Add(landingPos);
+        foreach (var p in cells)
+            if (p != landingPos)
+                flyTarget[p] = landingPos;
+
+        Debug.Log($"[MatchResolver] Combine rolled for a {cells.Count}-cell group - survivor lands at {landingPos}.");
+        EventBus.Publish(new CombineTriggeredEvent(landingPos, cells.Count));
+        return true;
     }
 
     /// <summary>

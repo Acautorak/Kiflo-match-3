@@ -83,6 +83,43 @@ public class SpecialSymbolEventRelay : MonoBehaviour
     [Min(1)]
     [SerializeField] private int wonkyShakeVibrato = 14;
 
+    [Header("Combine Popup - Prefab")]
+    [Tooltip("Must have a ComboPopupText component. Leave empty to auto-create a basic world-space TextMeshPro popup at runtime, same fallback as the other popups above.")]
+    [SerializeField] private ComboPopupText combinePopupPrefab;
+
+    [Header("Combine Popup - Text")]
+    [SerializeField] private string combineText = "COMBINE!";
+    [Tooltip("Appended as 'x{CellsCombined}' when the combined group is bigger than a plain 3-match, same spirit as the Combo popup's x{ChainCount}.")]
+    [Min(4)]
+    [SerializeField] private int cellsCombinedToShowCount = 4;
+    [SerializeField] private float combineFontSize = 6.5f;
+    [Tooltip("Deliberately distinct from Combo's orange and Wonky's purple, so a Combine reads as its own thing at a glance.")]
+    [SerializeField] private Color combineColor = new Color(0.3f, 1f, 0.55f); // green
+
+    [Header("Combine Popup - Motion")]
+    [Tooltip("Bigger than Combo/Wonky's punch scale - Combine was specifically asked to feel juicier/bouncier than the others.")]
+    [SerializeField] private float combineRiseDistance = 1.3f;
+    [SerializeField] private float combineLifetime = 0.9f;
+    [SerializeField] private float combinePunchScale = 0.5f;
+    [Tooltip("A little shake, like Wonky's - Combine should read as energetic/playful, not a flat rise.")]
+    [Min(0f)]
+    [SerializeField] private float combineShakeStrength = 0.04f;
+    [Min(1)]
+    [SerializeField] private int combineShakeVibrato = 10;
+    [Tooltip("World-space offset applied above the survivor's cell.")]
+    [SerializeField] private Vector3 combineSpawnOffset = new Vector3(0f, 0.25f, 0f);
+
+    [Header("Combine Slow-Mo")]
+    [Tooltip("Time.timeScale during the brief slow-mo beat that plays every time a Combine " +
+             "triggers (not gated by a multiple like Combo's - Combine is already a rare, " +
+             "chance-based event, so every occurrence gets the beat). Same 'most restrictive " +
+             "wins' TimeController stacking as Combo's slow-mo, so overlapping beats compose " +
+             "safely instead of fighting each other.")]
+    [Range(0f, 1f)]
+    [SerializeField] private float combineSlowMoTimeScale = 0.25f;
+    [Tooltip("How long the slow-mo beat lasts, in REAL (unscaled) seconds.")]
+    [SerializeField] private float combineSlowMoDuration = 0.3f;
+
     [Header("Grace Move Popup - Prefab")]
     [Tooltip("Must have a ComboPopupText component. Leave empty to auto-create a basic world-space TextMeshPro popup at runtime, same fallback as the other popups above.")]
     [SerializeField] private ComboPopupText graceMovePopupPrefab;
@@ -109,6 +146,7 @@ public class SpecialSymbolEventRelay : MonoBehaviour
         EventBus.Subscribe<SpecialSymbolMatchedEvent>(HandleSpecialMatched);
         EventBus.Subscribe<ChainMatchedEvent>(HandleChainMatched);
         EventBus.Subscribe<GraceMoveArmedEvent>(HandleGraceMoveArmed);
+        EventBus.Subscribe<CombineTriggeredEvent>(HandleCombineTriggered);
     }
 
     private void OnDisable()
@@ -116,6 +154,7 @@ public class SpecialSymbolEventRelay : MonoBehaviour
         EventBus.Unsubscribe<SpecialSymbolMatchedEvent>(HandleSpecialMatched);
         EventBus.Unsubscribe<ChainMatchedEvent>(HandleChainMatched);
         EventBus.Unsubscribe<GraceMoveArmedEvent>(HandleGraceMoveArmed);
+        EventBus.Unsubscribe<CombineTriggeredEvent>(HandleCombineTriggered);
     }
 
     /// <summary>Spawns the "Grace Move" popup at graceMovePopupAnchor - separate from the
@@ -208,6 +247,33 @@ public class SpecialSymbolEventRelay : MonoBehaviour
     {
         int handle = TimeController.Push(comboSlowMoTimeScale);
         yield return new WaitForSecondsRealtime(comboSlowMoDuration);
+        TimeController.Pop(handle);
+    }
+
+    /// <summary>Spawns the "COMBINE!" popup at the survivor's cell and kicks off a brief slow-mo
+    /// beat - every trigger gets both, unlike Combo's popup/slow-mo which are separately gated
+    /// (minChainCountToShow / comboSlowMoMultiple), since a Combine is already rare on its own.</summary>
+    private void HandleCombineTriggered(CombineTriggeredEvent evt)
+    {
+        StartCoroutine(PlayCombineSlowMo());
+
+        if (Board.Instance == null) return;
+
+        Vector3 worldPos = Board.Instance.GridToWorldPosition(evt.SurvivorPosition.x, evt.SurvivorPosition.y) + combineSpawnOffset;
+        string text = evt.CellsCombined >= cellsCombinedToShowCount ? $"{combineText} x{evt.CellsCombined}" : combineText;
+
+        ComboPopupText popup = combinePopupPrefab != null
+            ? Instantiate(combinePopupPrefab, worldPos, Quaternion.identity)
+            : ComboPopupText.CreateRuntime(worldPos);
+
+        popup.Play(text, combineColor, combineFontSize, combineRiseDistance, combineLifetime, combinePunchScale,
+            combineShakeStrength, combineShakeVibrato);
+    }
+
+    private System.Collections.IEnumerator PlayCombineSlowMo()
+    {
+        int handle = TimeController.Push(combineSlowMoTimeScale);
+        yield return new WaitForSecondsRealtime(combineSlowMoDuration);
         TimeController.Pop(handle);
     }
 }

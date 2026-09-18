@@ -541,7 +541,7 @@ RectTransform:
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 0, y: 0}
   m_AnchorMax: {x: 1, y: 1}
-  m_AnchoredPosition: {x: 0, y: -68}
+  m_AnchoredPosition: {x: 0, y: 95}
   m_SizeDelta: {x: -324.3115, y: -752.2678}
   m_Pivot: {x: 0.5, y: 0.5}
 --- !u!114 &108514249
@@ -2161,7 +2161,7 @@ RectTransform:
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 0.5, y: 0.5}
   m_AnchorMax: {x: 0.5, y: 0.5}
-  m_AnchoredPosition: {x: 432, y: 943}
+  m_AnchoredPosition: {x: 432, y: 874}
   m_SizeDelta: {x: 300, y: 100}
   m_Pivot: {x: 0.5, y: 0.5}
 --- !u!114 &312016260
@@ -2328,7 +2328,7 @@ Camera:
   far clip plane: 1000
   field of view: 60
   orthographic: 1
-  orthographic size: 8
+  orthographic size: 7
   m_Depth: -1
   m_CullingMask:
     serializedVersion: 2
@@ -2777,7 +2777,7 @@ RectTransform:
   m_AnchorMin: {x: 0.5, y: 0.5}
   m_AnchorMax: {x: 0.5, y: 0.5}
   m_AnchoredPosition: {x: -335, y: 880}
-  m_SizeDelta: {x: 300, y: 100}
+  m_SizeDelta: {x: 250, y: 75}
   m_Pivot: {x: 0.5, y: 0.5}
 --- !u!114 &436674160
 MonoBehaviour:
@@ -2826,7 +2826,7 @@ MonoBehaviour:
   m_faceColor:
     serializedVersion: 2
     rgba: 4294967295
-  m_fontSize: 89.5
+  m_fontSize: 67.1
   m_fontSizeBase: 37.56
   m_fontWeight: 400
   m_enableAutoSizing: 1
@@ -3984,6 +3984,19 @@ MonoBehaviour:
   wonkySpawnOffset: {x: 0, y: 0.25, z: 0}
   wonkyShakeStrength: 0.06
   wonkyShakeVibrato: 14
+  combinePopupPrefab: {fileID: 0}
+  combineText: COMBINE!
+  cellsCombinedToShowCount: 4
+  combineFontSize: 6.5
+  combineColor: {r: 0.3, g: 1, b: 0.55, a: 1}
+  combineRiseDistance: 1.3
+  combineLifetime: 0.9
+  combinePunchScale: 0.5
+  combineShakeStrength: 0.04
+  combineShakeVibrato: 10
+  combineSpawnOffset: {x: 0, y: 0.25, z: 0}
+  combineSlowMoTimeScale: 0.25
+  combineSlowMoDuration: 0.3
   graceMovePopupPrefab: {fileID: 0}
   graceMovePopupAnchor: {fileID: 0}
   graceMoveText: GRACE MOVE!
@@ -5566,8 +5579,8 @@ RectTransform:
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 0.5, y: 0.5}
   m_AnchorMax: {x: 0.5, y: 0.5}
-  m_AnchoredPosition: {x: -4, y: -717}
-  m_SizeDelta: {x: 400, y: 200}
+  m_AnchoredPosition: {x: -4, y: -775}
+  m_SizeDelta: {x: 700, y: 150}
   m_Pivot: {x: 0.5, y: 0.5}
 --- !u!114 &900176018
 MonoBehaviour:
@@ -5616,7 +5629,7 @@ MonoBehaviour:
   m_faceColor:
     serializedVersion: 2
     rgba: 4294967295
-  m_fontSize: 179
+  m_fontSize: 134.25
   m_fontSizeBase: 37.56
   m_fontWeight: 400
   m_enableAutoSizing: 1
@@ -7742,8 +7755,8 @@ RectTransform:
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 0.5, y: 0.5}
   m_AnchorMax: {x: 0.5, y: 0.5}
-  m_AnchoredPosition: {x: -331, y: 769}
-  m_SizeDelta: {x: 300, y: 100}
+  m_AnchoredPosition: {x: -331, y: 791}
+  m_SizeDelta: {x: 250, y: 75}
   m_Pivot: {x: 0.5, y: 0.5}
 --- !u!114 &1283578825
 MonoBehaviour:
@@ -7792,7 +7805,7 @@ MonoBehaviour:
   m_faceColor:
     serializedVersion: 2
     rgba: 4294967295
-  m_fontSize: 89.5
+  m_fontSize: 67.1
   m_fontSizeBase: 37.56
   m_fontWeight: 400
   m_enableAutoSizing: 1
@@ -7909,6 +7922,7 @@ MonoBehaviour:
   randomSpecialChanceBonus: 0
   lockChanceReduction: 0
   igniteOnMatchChanceBonus: 0
+  combineOnMatchChanceBonus: 0
   scoreMultiplier: 1
   bonusGraceMoves: 0
   kebabTapDamageBonus: 0
@@ -9114,7 +9128,7 @@ Transform:
   m_GameObject: {fileID: 1542153868}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 0.02, y: -7.87, z: 0}
+  m_LocalPosition: {x: 0.02, y: -6.93, z: 0}
   m_LocalScale: {x: 14.091257, y: 0.62388444, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
@@ -11563,7 +11577,7 @@ RectTransform:
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 0.5, y: 0.5}
   m_AnchorMax: {x: 0.5, y: 0.5}
-  m_AnchoredPosition: {x: 350.2, y: 880.6999}
+  m_AnchoredPosition: {x: 350.2, y: 811.6999}
   m_SizeDelta: {x: 160, y: 20}
   m_Pivot: {x: 0.5, y: 0.5}
 --- !u!114 &2061150902

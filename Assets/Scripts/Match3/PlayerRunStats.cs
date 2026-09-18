@@ -18,6 +18,12 @@ public class PlayerRunStats : MonoBehaviour
              "adjacent to the match ignites and starts burning down (see BurningSystem). Baseline " +
              "0, so this is purely a powerup-granted chance, same shape as randomSpecialChanceBonus.")]
     [SerializeField] private float igniteOnMatchChanceBonus = 0f;
+    [Tooltip("Chance (0-1), rolled once per matched group, that its cells combine into ONE " +
+             "surviving symbol of the matched color (at a random one of their positions) instead " +
+             "of all clearing independently. Baseline 0 - purely a powerup-granted chance, same " +
+             "shape as igniteOnMatchChanceBonus. Scoring/events are unaffected either way - see " +
+             "MatchResolver.Resolve for the actual mechanic.")]
+    [SerializeField] private float combineOnMatchChanceBonus = 0f;
     [SerializeField] private float scoreMultiplier = 1f;
     [SerializeField] private int bonusGraceMoves = 0;
     [SerializeField] private int kebabTapDamageBonus = 0;
@@ -52,6 +58,8 @@ public class PlayerRunStats : MonoBehaviour
     public float RandomSpecialChanceBonus => randomSpecialChanceBonus;
     /// <summary>Chance (0-1, clamped) rolled once per matched group by BurningSystem.TryIgniteNearby.</summary>
     public float IgniteOnMatchChance => Mathf.Clamp01(igniteOnMatchChanceBonus);
+    /// <summary>Chance (0-1, clamped) rolled once per matched group by MatchResolver.Resolve.</summary>
+    public float CombineOnMatchChance => Mathf.Clamp01(combineOnMatchChanceBonus);
     /// <summary>Subtracted directly from a stage's lockSpawnChance (covers both lock spawn and frozen-tile rolls).</summary>
     public float LockChanceReduction => lockChanceReduction;
     /// <summary>Multiplies every scoreDelta before it's added to the board's score.</summary>
@@ -68,6 +76,7 @@ public class PlayerRunStats : MonoBehaviour
         randomSpecialChanceBonus = 0f;
         lockChanceReduction = 0f;
         igniteOnMatchChanceBonus = 0f;
+        combineOnMatchChanceBonus = 0f;
         scoreMultiplier = 1f;
         bonusGraceMoves = 0;
         kebabTapDamageBonus = 0;
@@ -88,6 +97,13 @@ public class PlayerRunStats : MonoBehaviour
     {
         if (amount == 0f) return;
         igniteOnMatchChanceBonus += amount;
+        EventBus.Publish(new PlayerStatsChangedEvent(this));
+    }
+
+    public void AddCombineOnMatchChanceBonus(float amount)
+    {
+        if (amount == 0f) return;
+        combineOnMatchChanceBonus += amount;
         EventBus.Publish(new PlayerStatsChangedEvent(this));
     }
 
@@ -202,6 +218,7 @@ public class PlayerRunStats : MonoBehaviour
             randomSpecialChanceBonus = randomSpecialChanceBonus,
             lockChanceReduction = lockChanceReduction,
             igniteOnMatchChanceBonus = igniteOnMatchChanceBonus, // REQUIRES a matching field added to PlayerRunStatsSaveData - see note in RestoreFromSave
+            combineOnMatchChanceBonus = combineOnMatchChanceBonus, // REQUIRES a matching field added to PlayerRunStatsSaveData - see note in RestoreFromSave
             scoreMultiplier = scoreMultiplier,
             bonusGraceMoves = bonusGraceMoves,
             kebabTapDamageBonus = kebabTapDamageBonus,
@@ -243,6 +260,9 @@ public class PlayerRunStats : MonoBehaviour
         // NOTE: same caveat as graceMoveChanceBonus below - assumes PlayerRunStatsSaveData has a
         // `public float igniteOnMatchChanceBonus;` field; add it there if it isn't already present.
         igniteOnMatchChanceBonus = data.igniteOnMatchChanceBonus;
+        // NOTE: same caveat - assumes PlayerRunStatsSaveData has a
+        // `public float combineOnMatchChanceBonus;` field; add it there if it isn't already present.
+        combineOnMatchChanceBonus = data.combineOnMatchChanceBonus;
         scoreMultiplier = Mathf.Max(0f, data.scoreMultiplier);
         bonusGraceMoves = Mathf.Max(0, data.bonusGraceMoves);
         kebabTapDamageBonus = Mathf.Max(0, data.kebabTapDamageBonus);
@@ -270,7 +290,7 @@ public class PlayerRunStats : MonoBehaviour
 
         Debug.Log($"[PlayerRunStats] Restored from save: scoreMultiplier={scoreMultiplier}, " +
                   $"randomSpecialChanceBonus={randomSpecialChanceBonus}, lockChanceReduction={lockChanceReduction}, " +
-                  $"igniteOnMatchChanceBonus={igniteOnMatchChanceBonus}, " +
+                  $"igniteOnMatchChanceBonus={igniteOnMatchChanceBonus}, combineOnMatchChanceBonus={combineOnMatchChanceBonus}, " +
                   $"bonusGraceMoves={bonusGraceMoves}, kebabTapDamageBonus={kebabTapDamageBonus}, colorBonuses={colorBonuses.Count}");
         EventBus.Publish(new PlayerStatsChangedEvent(this));
     }

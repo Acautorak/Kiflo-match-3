@@ -48,6 +48,7 @@ public class PlayerRunStatsSaveData
     public float graceMoveChanceBonus;
     public ColorBonusSaveData[] colorBonuses;
     public float igniteOnMatchChanceBonus;
+    public float combineOnMatchChanceBonus;
 }
 
 [Serializable]
