@@ -10,15 +10,18 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 7843c50a404db474a904c3972baeb8ab, type: 3}
-  m_Name: Combine
+  m_Name: Lightning
   m_EditorClassIdentifier: Assembly-CSharp::PowerupDefinition
-  title: Combine chance
-  description: Tiles have a chance to combine when matched
-  icon: {fileID: 21300000, guid: 2c66be4db33909f4ba266b48a6042058, type: 3}
+  title: Chain Lightning
+  description: Chance to create chain lightning on match
+  icon: {fileID: 21300000, guid: 1db1d06d5524d8c43a09f9304a22d78d, type: 3}
   weight: 8
   randomSpecialChanceBonus: 0
   igniteOnMatchChanceBonus: 0
-  combineOnMatchChanceBonus: 0.01
+  combineOnMatchChanceBonus: 0
+  chainLightningChanceBonus: 0.01
+  chainLightningHitCountBonus: 0
+  tensionSpinChanceBonus: 0
   lockChanceReduction: 0
   scoreMultiplierBonus: 0.01
   bonusGraceMoves: 0

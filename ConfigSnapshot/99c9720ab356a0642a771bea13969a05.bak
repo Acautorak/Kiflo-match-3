@@ -2328,7 +2328,7 @@ Camera:
   far clip plane: 1000
   field of view: 60
   orthographic: 1
-  orthographic size: 7
+  orthographic size: 7.25
   m_Depth: -1
   m_CullingMask:
     serializedVersion: 2
@@ -4784,16 +4784,22 @@ MonoBehaviour:
   freeSpinsColumnStartStagger: 0.08
   freeSpinsReelSpinDuration: 1.5
   freeSpinsReelTumbleStepDuration: 0.15
-  freeSpinsMinimumForcedChain: 1
+  freeSpinsMinimumForcedChain: 2
   stageClearExplosionsPerWave: 4
   stageClearExplosionWaveDelay: 0.05
   allowNonMatchingSwaps: 1
   intersectionsCreateBombs: 1
   enableRandomSpecialOnGravity: 1
-  randomSpecialTriggerChance: 0.05
+  randomSpecialTriggerChance: 0
   eligibleRandomSpecialTypes: 01000000020000000300000004000000
   maxConsecutiveRandomTriggers: 7
   maxCascadeSteps: 30
+  chainLightningTimeScale: 0.6
+  chainLightningHopDelay: 0.12
+  chainLightningSettleDelay: 0.15
+  tensionSpinReelDuration: 0.7
+  tensionSpinTumbleStepDuration: 0.08
+  tensionSpinLandingDuration: 0.3
   destroySymbolWhenUnlocked: 1
   lockedTilesFallWithGravity: 0
   frozenTileSpawnMode: 3
@@ -7388,7 +7394,7 @@ MonoBehaviour:
   baseSpinCount: 3
   overflowPerBonusSpin: 10
   maxSpinCount: 10
-  guaranteedWonkyChainThreshold: 4
+  guaranteedWonkyChainThreshold: 1
   OnModeStarted:
     m_PersistentCalls:
       m_Calls: []
@@ -7923,6 +7929,9 @@ MonoBehaviour:
   lockChanceReduction: 0
   igniteOnMatchChanceBonus: 0
   combineOnMatchChanceBonus: 0
+  chainLightningChanceBonus: 0
+  chainLightningHitCountBonus: 0
+  tensionSpinChanceBonus: 0
   scoreMultiplier: 1
   bonusGraceMoves: 0
   kebabTapDamageBonus: 0
@@ -9479,6 +9488,57 @@ Transform:
   m_Children: []
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1 &1665738141
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 1665738143}
+  - component: {fileID: 1665738142}
+  m_Layer: 0
+  m_Name: TensionSpin
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &1665738142
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1665738141}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: eb8eb5db932202b40b0954a6eea36d20, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::TensionSpinVisualizer
+  stripColor: {r: 1, g: 0.85, b: 0.3, a: 0.35}
+  stripThickness: 1
+  pulseAmount: 0.5
+  pulseSpeed: 4
+  maxLifetimeSafety: 5
+  sortingLayerName: Symbols
+  sortingOrder: -1
+--- !u!4 &1665738143
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1665738141}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &1667589724
 GameObject:
   m_ObjectHideFlags: 0
@@ -9857,6 +9917,57 @@ CanvasRenderer:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1765705890}
   m_CullTransparentMesh: 1
+--- !u!1 &1793167992
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 1793167994}
+  - component: {fileID: 1793167993}
+  m_Layer: 0
+  m_Name: ChainLightning
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &1793167993
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1793167992}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: f1043d7392dc0954ca374e88a05a7534, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::ChainLightningVisualizer
+  boltColor: {r: 0.65, g: 0.85, b: 1, a: 1}
+  boltWidth: 0.09
+  boltLifetime: 0.15
+  jaggedSegments: 4
+  jaggedness: 0.15
+  sortingLayerName: Symbols
+  sortingOrder: 100
+--- !u!4 &1793167994
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1793167992}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &1813053466
 GameObject:
   m_ObjectHideFlags: 0
@@ -12240,3 +12351,5 @@ SceneRoots:
   - {fileID: 1871832794}
   - {fileID: 1034541661}
   - {fileID: 848238799}
+  - {fileID: 1793167994}
+  - {fileID: 1665738143}

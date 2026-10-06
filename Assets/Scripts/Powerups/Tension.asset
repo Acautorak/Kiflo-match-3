@@ -10,15 +10,18 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 7843c50a404db474a904c3972baeb8ab, type: 3}
-  m_Name: Combine
+  m_Name: Tension
   m_EditorClassIdentifier: Assembly-CSharp::PowerupDefinition
-  title: Combine chance
-  description: Tiles have a chance to combine when matched
-  icon: {fileID: 21300000, guid: 2c66be4db33909f4ba266b48a6042058, type: 3}
-  weight: 8
+  title: Tension Spin
+  description: Increase chance for tension spin on match
+  icon: {fileID: 21300000, guid: 2cbfc8018073c5842a67a1eb0440093e, type: 3}
+  weight: 9
   randomSpecialChanceBonus: 0
   igniteOnMatchChanceBonus: 0
-  combineOnMatchChanceBonus: 0.01
+  combineOnMatchChanceBonus: 0
+  chainLightningChanceBonus: 0
+  chainLightningHitCountBonus: 0
+  tensionSpinChanceBonus: 0.01
   lockChanceReduction: 0
   scoreMultiplierBonus: 0.01
   bonusGraceMoves: 0

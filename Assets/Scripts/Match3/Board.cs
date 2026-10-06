@@ -81,6 +81,38 @@ public class Board : MonoBehaviour
     [Min(1)]
     [SerializeField] private int maxCascadeSteps = 50;
 
+    [Header("Chain Lightning Powerup")]
+    [Tooltip("Time.timeScale multiplier (via TimeController) while a Chain Lightning arc plays - e.g. 0.35 = 35% speed.")]
+    [Range(0.05f, 1f)] [SerializeField] private float chainLightningTimeScale = 0.35f;
+    [Tooltip("Delay between each Chain Lightning hop, so the chain reads as discrete jumps rather than everything popping at once.")]
+    [Min(0f)] [SerializeField] private float chainLightningHopDelay = 0.12f;
+    [Tooltip("Extra pause after the last hop before Chain Lightning restores normal time scale.")]
+    [Min(0f)] [SerializeField] private float chainLightningSettleDelay = 0.15f;
+
+    [Header("Tension Spin Powerup")]
+    [Tooltip("How long a Tension Spin proc's row/column visibly conveyor-scrolls before its landing tick - same idea as Free Spins' own reel duration, just a separate knob.")]
+    [Min(0f)] [SerializeField] private float tensionSpinReelDuration = 0.5f;
+    [Tooltip("How long each individual Tension Spin conveyor tick takes - lower = faster-scrolling reel.")]
+    [Min(0.01f)] [SerializeField] private float tensionSpinTumbleStepDuration = 0.08f;
+    [Tooltip("How long Tension Spin's final landing tick takes, once the tumble ticks above finish.")]
+    [Min(0.01f)] [SerializeField] private float tensionSpinLandingDuration = 0.3f;
+
+    [Header("Meteor Shower Powerup")]
+    [Tooltip("How many cells above the top of the board a meteor's visible flight starts from.")]
+    [Min(1f)] [SerializeField] private float meteorShowerSkyHeight = 8f;
+    [Tooltip("How long a meteor's fall from the sky to its target takes, at normal time scale.")]
+    [Min(0.01f)] [SerializeField] private float meteorShowerFlightDuration = 0.45f;
+    [Tooltip("Time.timeScale multiplier (via TimeController) for the brief hit-pause right as a meteor lands - only covers the impact, not the fall itself.")]
+    [Range(0.05f, 1f)] [SerializeField] private float meteorShowerImpactTimeScale = 0.25f;
+    [Tooltip("How long the impact hit-pause holds.")]
+    [Min(0f)] [SerializeField] private float meteorShowerImpactPauseDuration = 0.15f;
+
+    [Header("Magnet Pulse Powerup")]
+    [Tooltip("How long each pulled-in stray tile's flight tween takes.")]
+    [Min(0.01f)] [SerializeField] private float magnetPulseFlightDuration = 0.35f;
+    [Tooltip("Pause between successive stray-tile pulls within the same proc, so a multi-hit proc reads as a sequence rather than everything snapping at once.")]
+    [Min(0f)] [SerializeField] private float magnetPulseHopDelay = 0.1f;
+
     [Header("Locking / Freezing")]
     [Tooltip("If true, breaking a lock's final layer also clears/destroys the tile immediately " +
              "(classic 'destroy to unlock' obstacle behavior). If false, the lock just falls away " +
@@ -276,7 +308,19 @@ public class Board : MonoBehaviour
             MaxConsecutiveRandomTriggers = maxConsecutiveRandomTriggers,
             RandomSpecialTriggerChance = randomSpecialTriggerChance,
             EnableRandomSpecialOnGravity = enableRandomSpecialOnGravity,
-            MaxCascadeSteps = maxCascadeSteps
+            MaxCascadeSteps = maxCascadeSteps,
+            ChainLightningTimeScale = chainLightningTimeScale,
+            ChainLightningHopDelay = chainLightningHopDelay,
+            ChainLightningSettleDelay = chainLightningSettleDelay,
+            TensionSpinReelDuration = tensionSpinReelDuration,
+            TensionSpinTumbleStepDuration = tensionSpinTumbleStepDuration,
+            TensionSpinLandingDuration = tensionSpinLandingDuration,
+            MagnetPulseFlightDuration = magnetPulseFlightDuration,
+            MagnetPulseHopDelay = magnetPulseHopDelay,
+            MeteorShowerSkyHeight = meteorShowerSkyHeight,
+            MeteorShowerFlightDuration = meteorShowerFlightDuration,
+            MeteorShowerImpactTimeScale = meteorShowerImpactTimeScale,
+            MeteorShowerImpactPauseDuration = meteorShowerImpactPauseDuration
         };
 
         freeSpinsController = new FreeSpinsController(grid, symbolSpawner, matchResolver, gameManager, this, fallDuration, GridToWorld,

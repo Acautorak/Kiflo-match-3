@@ -49,6 +49,13 @@ public class PlayerRunStatsSaveData
     public ColorBonusSaveData[] colorBonuses;
     public float igniteOnMatchChanceBonus;
     public float combineOnMatchChanceBonus;
+    public float chainLightningChanceBonus;
+    public int chainLightningHitCountBonus;
+    public float tensionSpinChanceBonus;
+    public float magnetPulseChanceBonus;
+    public int magnetPulseHitCountBonus;
+    public float meteorShowerChanceBonus;
+    public int meteorShowerCountBonus;
 }
 
 [Serializable]

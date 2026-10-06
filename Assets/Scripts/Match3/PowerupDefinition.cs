@@ -28,6 +28,42 @@ public class PowerupDefinition : ScriptableObject
              "matched color instead of all clearing independently. Baseline 0. See " +
              "MatchResolver.Resolve.")]
     [Range(0f, 1f)] public float combineOnMatchChanceBonus;
+    [Tooltip("Added to PlayerRunStats.ChainLightningChance (0-1 fraction) - the chance, rolled " +
+             "once per matched group, that a bolt of chain lightning arcs out and additionally " +
+             "clears ChainLightningHitCount random tiles elsewhere on the board (locked tiles take " +
+             "a normal lock hit, same as being caught in a real match). Baseline 0, so this is " +
+             "what gives the player any chance at all. See MatchResolver.TryTriggerChainLightning.")]
+    [Range(0f, 1f)] public float chainLightningChanceBonus;
+    [Tooltip("Added to PlayerRunStats.ChainLightningHitCount ON TOP OF its baseline of 5 - a " +
+             "Chain Lightning proc always hits 5 random tiles even with no powerups picked, so " +
+             "this only matters once chainLightningChanceBonus is > 0 (from this or another " +
+             "powerup) and you want it to hit MORE than the default 5.")]
+    [Min(0)] public int chainLightningHitCountBonus;
+    [Tooltip("Added to PlayerRunStats.TensionSpinChance (0-1 fraction) - the chance, rolled once " +
+             "per matched group, that the entire row/column the triggering match ran along spins " +
+             "like a slot reel and re-lands with fresh random symbols (see " +
+             "MatchResolver.TriggerTensionSpin). Baseline 0, so this is what gives the player any " +
+             "chance at all.")]
+    [Range(0f, 1f)] public float tensionSpinChanceBonus;
+    [Tooltip("Added to PlayerRunStats.MagnetPulseChance (0-1 fraction) - the chance, rolled once " +
+             "per matched group, that Magnet Pulse procs: finds the biggest same-color blob " +
+             "anywhere on the board and pulls stray tiles of that color in from elsewhere to grow " +
+             "it (see MatchResolver.TriggerMagnetPulse). Baseline 0, so this is what gives the " +
+             "player any chance at all.")]
+    [Range(0f, 1f)] public float magnetPulseChanceBonus;
+    [Tooltip("Added to PlayerRunStats.MagnetPulseHitCount ON TOP OF its baseline of 1 - a Magnet " +
+             "Pulse proc always pulls in 1 stray tile even with no powerups picked, so this only " +
+             "matters once magnetPulseChanceBonus is > 0 and you want more than 1 pulled per proc.")]
+    [Min(0)] public int magnetPulseHitCountBonus;
+    [Tooltip("Added to PlayerRunStats.MeteorShowerChance (0-1 fraction) - the chance, rolled once " +
+             "per matched group, that a meteor falls and strikes a 2x2 square of tiles elsewhere " +
+             "on the board, collecting them normally (see MatchResolver.TriggerMeteorShower). " +
+             "Baseline 0, so this is what gives the player any chance at all.")]
+    [Range(0f, 1f)] public float meteorShowerChanceBonus;
+    [Tooltip("Added to PlayerRunStats.MeteorShowerCount ON TOP OF its baseline of 1 - a proc " +
+             "always drops 1 meteor even with no powerups picked, so this only matters once " +
+             "meteorShowerChanceBonus is > 0 and you want more than 1 meteor per proc.")]
+    [Min(0)] public int meteorShowerCountBonus;
     [Tooltip("Added to PlayerRunStats.LockChanceReduction (reduces lock/freeze spawn chance).")]
     public float lockChanceReduction;
     [Tooltip("Added to PlayerRunStats.ScoreMultiplier (e.g. 0.1 = +10% score for the rest of the run).")]
@@ -75,6 +111,13 @@ public class PowerupDefinition : ScriptableObject
         {
             stats.AddRandomSpecialChanceBonus(randomSpecialChanceBonus);
             stats.AddIgniteChanceBonus(igniteOnMatchChanceBonus);
+            stats.AddChainLightningChanceBonus(chainLightningChanceBonus);
+            stats.AddChainLightningHitCountBonus(chainLightningHitCountBonus);
+            stats.AddTensionSpinChanceBonus(tensionSpinChanceBonus);
+            stats.AddMagnetPulseChanceBonus(magnetPulseChanceBonus);
+            stats.AddMagnetPulseHitCountBonus(magnetPulseHitCountBonus);
+            stats.AddMeteorShowerChanceBonus(meteorShowerChanceBonus);
+            stats.AddMeteorShowerCountBonus(meteorShowerCountBonus);
             stats.AddCombineOnMatchChanceBonus(combineOnMatchChanceBonus);
             stats.AddLockChanceReduction(lockChanceReduction);
             stats.AddScoreMultiplier(scoreMultiplierBonus);

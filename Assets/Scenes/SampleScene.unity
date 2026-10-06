@@ -4769,7 +4769,7 @@ MonoBehaviour:
   m_GameObject: {fileID: 835766942}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: c5b3e9a703ff4814b9c503a91d2b33b0, type: 3}
+  m_Script: {fileID: 11500000, guid: 8f6f63f87a603ce4d9a068176c19687c, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::Board
   width: 7
@@ -4782,34 +4782,42 @@ MonoBehaviour:
   swapDuration: 0.2
   fallDuration: 0.25
   freeSpinsColumnStartStagger: 0.08
-  freeSpinsReelSpinDuration: 1.5
-  freeSpinsReelTumbleStepDuration: 0.15
+  freeSpinsReelSpinDuration: 0.6
+  freeSpinsReelTumbleStepDuration: 0.08
   freeSpinsMinimumForcedChain: 1
   stageClearExplosionsPerWave: 4
   stageClearExplosionWaveDelay: 0.05
   allowNonMatchingSwaps: 1
   intersectionsCreateBombs: 1
-  enableRandomSpecialOnGravity: 1
+  enableRandomSpecialOnGravity: 0
   randomSpecialTriggerChance: 0.05
   eligibleRandomSpecialTypes: 01000000020000000300000004000000
-  maxConsecutiveRandomTriggers: 7
-  maxCascadeSteps: 30
+  maxConsecutiveRandomTriggers: 3
+  maxCascadeSteps: 50
+  chainLightningTimeScale: 0.35
+  chainLightningHopDelay: 0.12
+  chainLightningSettleDelay: 0.15
+  tensionSpinReelDuration: 0.5
+  tensionSpinTumbleStepDuration: 0.08
+  tensionSpinLandingDuration: 0.3
+  magnetPulseFlightDuration: 0.35
+  magnetPulseHopDelay: 0.1
   destroySymbolWhenUnlocked: 1
   lockedTilesFallWithGravity: 0
-  frozenTileSpawnMode: 3
-  frozenTileBottomRowCount: 3
+  frozenTileSpawnMode: 0
+  frozenTileBottomRowCount: 0
   frozenTileOutsideBottomRowsChanceMultiplier: 0.25
   scorePerLockHit: 5
   allowSwappingLockedTiles: 0
   initialLockPlacements: []
-  burnDurationMoves: 2
+  burnDurationMoves: 3
   scorePerBurntTile: 15
   burningSparkPrefab: {fileID: 600263742782289124, guid: 3cb4ce873732630418025af3fea845cd, type: 3}
-  burningSparkParent: {fileID: 1452420351}
-  burningSparkFlightDuration: 1
+  burningSparkParent: {fileID: 0}
+  burningSparkFlightDuration: 0.35
   burningSparkArcHeight: 0.75
   spawnLocksOnRefill: 1
-  lockSpawnChance: 0.005
+  lockSpawnChance: 0.05
   lockSpawnOptions:
   - layers: 1
     behavior: 2
@@ -4819,23 +4827,13 @@ MonoBehaviour:
     behavior: 2
     movesPerLayer: 3
     weight: 2
-  - layers: 5
+  - layers: 1
     behavior: 1
     movesPerLayer: 3
     weight: 1
-  spawnMadnessOnRefill: 1
-  madnessSpawnChance: 0.009
-  madnessSpawnOptions:
-  - definition: {fileID: 11400000, guid: aaf4a03a8d499f249af013bc07dae946, type: 2}
-    weight: 1
-  - definition: {fileID: 11400000, guid: b763b2e55a431e94c90c87c78ca9760d, type: 2}
-    weight: 1
-  - definition: {fileID: 11400000, guid: dba6bc74f8e34bc48ac1327a6f5e55fa, type: 2}
-    weight: 1
-  - definition: {fileID: 11400000, guid: 671885453ccec2745a592e7c39f560e8, type: 2}
-    weight: 1
-  - definition: {fileID: 11400000, guid: 4d1aafef9b4e2704f9cb8f1387c0c2ec, type: 2}
-    weight: 1
+  spawnMadnessOnRefill: 0
+  madnessSpawnChance: 0.03
+  madnessSpawnOptions: []
   treatMadnessSymbolsAsWildcards: 1
   madnessConvertHighlightStagger: 0.06
   madnessBoardModifiers: {fileID: 1032087010}
@@ -7923,6 +7921,11 @@ MonoBehaviour:
   lockChanceReduction: 0
   igniteOnMatchChanceBonus: 0
   combineOnMatchChanceBonus: 0
+  chainLightningChanceBonus: 0
+  chainLightningHitCountBonus: 0
+  tensionSpinChanceBonus: 0
+  magnetPulseChanceBonus: 0
+  magnetPulseHitCountBonus: 0
   scoreMultiplier: 1
   bonusGraceMoves: 0
   kebabTapDamageBonus: 0
@@ -9857,6 +9860,99 @@ CanvasRenderer:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1765705890}
   m_CullTransparentMesh: 1
+--- !u!1 &1797028901
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 1797028905}
+  - component: {fileID: 1797028904}
+  - component: {fileID: 1797028903}
+  - component: {fileID: 1797028902}
+  m_Layer: 0
+  m_Name: Visualiser
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &1797028902
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1797028901}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: eb8eb5db932202b40b0954a6eea36d20, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::TensionSpinVisualizer
+  stripColor: {r: 1, g: 0.85, b: 0.3, a: 0.35}
+  stripThickness: 1
+  pulseAmount: 0.5
+  pulseSpeed: 4
+  maxLifetimeSafety: 5
+  sortingLayerName: Symbols
+  sortingOrder: -1
+--- !u!114 &1797028903
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1797028901}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 30594efcee75dc9498bb2db4ea452bcf, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::MagnetPulseVisualizer
+  streakColor: {r: 0.85, g: 0.4, b: 1, a: 0.8}
+  streakWidth: 0.08
+  jaggedSegments: 2
+  jaggedness: 0.1
+  popColor: {r: 0.85, g: 0.4, b: 1, a: 0.9}
+  popMaxScale: 0.9
+  popDuration: 0.2
+  sortingLayerName: Symbols
+  sortingOrder: 50
+--- !u!114 &1797028904
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1797028901}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: f1043d7392dc0954ca374e88a05a7534, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::ChainLightningVisualizer
+  boltColor: {r: 0.65, g: 0.85, b: 1, a: 1}
+  boltWidth: 0.06
+  boltLifetime: 0.15
+  jaggedSegments: 4
+  jaggedness: 0.15
+  sortingLayerName: Symbols
+  sortingOrder: 100
+--- !u!4 &1797028905
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1797028901}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &1813053466
 GameObject:
   m_ObjectHideFlags: 0
@@ -12240,3 +12336,4 @@ SceneRoots:
   - {fileID: 1871832794}
   - {fileID: 1034541661}
   - {fileID: 848238799}
+  - {fileID: 1797028905}

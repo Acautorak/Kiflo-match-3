@@ -1,4 +1,4 @@
-2026-09-18 16:38:19
+2026-09-25 11:20:42
 052faaac586de48259a63d0c4782560b|Assets/InputSystem_Actions.inputactions
 25fc99da23bc3ce4e88a31707febf6c3|Assets/Prefabs/LuckyTicket/Damage.asset
 f20dc917bdb85ec4db53f875c67058e0|Assets/Prefabs/LuckyTicket/HealReward.asset
@@ -33,6 +33,7 @@ bdb355f6ec0f89649a8747d8b1faeccc|Assets/Scripts/Powerups/Green/GreenHealAmount.a
 37a6349efe09ef8488c78cd0dfdd579c|Assets/Scripts/Powerups/Green/GreenHealChance.asset
 7c2528d4909f6da4d8223ba7b553778e|Assets/Scripts/Powerups/Heal.asset
 e8a263fbdd351ef40bca5901aa9298d8|Assets/Scripts/Powerups/IgniteChance.asset
+d567c4b389cede14989ae80d005a332a|Assets/Scripts/Powerups/Lightning.asset
 cec10c38c9cab6c4c8169fe38b06e9b4|Assets/Scripts/Powerups/LockChance.asset
 ea0a028671e9c66448ba0d2c640d63c9|Assets/Scripts/Powerups/MaxHealth.asset
 665012a98d692d24da87b4b046faab79|Assets/Scripts/Powerups/Purple/PurpleHealAmount.asset
@@ -41,6 +42,7 @@ ea0a028671e9c66448ba0d2c640d63c9|Assets/Scripts/Powerups/MaxHealth.asset
 2e5b267fd49acc443836256eae0c6058|Assets/Scripts/Powerups/Red/RedHealAmount.asset
 42c528e6a19bdf9498655810b1485beb|Assets/Scripts/Powerups/Red/RedHealChance.asset
 3ae7ad2630361374380b541ddce34968|Assets/Scripts/Powerups/ScoreMultiplier.asset
+1feb8aa3201f6e44ba5137c64e48ea61|Assets/Scripts/Powerups/Tension.asset
 e7b9ac5bf3cf8ac498e160a86d5b1d48|Assets/Scripts/Powerups/Yellow/YellowHealAmount.asset
 1e0bc49a9ae168a44b6f023574921856|Assets/Scripts/Powerups/Yellow/YellowHealChance.asset
 3078cbb8ee2a13946a6035da395b93ee|Assets/Scripts/Scratch Reward Pool.asset
